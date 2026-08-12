@@ -41,7 +41,6 @@ def _screen_id(index: int) -> str:
 def run_pipeline(
     video_path: Path | None = None,
     output_dir: Path | None = None,
-    figma_mcp_url: str = "http://localhost:3000",
     publish: bool = True,
     fps_limit: float = 5.0,
     on_progress: Callable[[str, str], None] | None = None,
@@ -232,14 +231,13 @@ def run_pipeline(
     layout = compute_tree_layout(graph)
 
     # ── Stage 6: Figma publish ────────────────────────────────────────────────
-    if publish and config.FIGMA_API_TOKEN and config.FIGMA_FILE_KEY:
-        progress("figma", "Publishing to Figma via MCP server")
+    if publish and config.FIGMA_FILE_KEY:
+        progress("figma", "Publishing to Figma via the remote MCP server")
         try:
             figma_url = publish_to_figma(
                 session=session,
                 graph=graph,
                 layout=layout,
-                mcp_base_url=figma_mcp_url,
                 progress_callback=lambda done, total, msg: progress("figma", f"[{done}/{total}] {msg}"),
             )
             progress("figma", f"Published: {figma_url}")

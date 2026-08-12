@@ -27,7 +27,7 @@ iOS Device (USB)
 - Python 3.11+
 - macOS (for iOS USB capture)
 - [LM Studio](https://lmstudio.ai/) with a vision-capable model loaded (e.g. LLaVA-Next)
-- [Figma MCP Server](https://developers.figma.com/docs/figma-mcp-server/) running locally
+- A Figma account — publishing uses [Figma's remote MCP server](https://developers.figma.com/docs/figma-mcp-server/) (`https://mcp.figma.com/mcp`); nothing to install or run locally, just a one-time browser sign-in on first publish
 - For live USB capture: `pip install 'autojourney[capture]'`
 
 ## Setup
@@ -46,15 +46,13 @@ Edit `.env`:
 LM_STUDIO_BASE_URL=http://localhost:1234/v1
 LM_STUDIO_MODEL=llava-llama-3-v-vision   # model name as shown in LM Studio
 
-FIGMA_API_TOKEN=your_figma_token
-FIGMA_FILE_KEY=your_file_key             # from the URL: figma.com/file/<FILE_KEY>/
+FIGMA_FILE_KEY=your_file_key             # from the URL: figma.com/design/<FILE_KEY>/
 ```
 
-Start the Figma MCP server (separate terminal):
-
-```bash
-npx -y @figma/mcp-server --port 3000 --figma-api-key=$FIGMA_API_TOKEN
-```
+No Figma token or local server to set up — the first `autojourney run` (or `publish`)
+opens a browser to authorize AutoJourney against your Figma account via OAuth. The
+resulting token is cached to `~/.config/autojourney/figma_oauth.json` and reused
+(and refreshed) on later runs.
 
 ## Usage
 
