@@ -20,6 +20,17 @@ def _ms_to_time(ms: int) -> str:
     return f"{minutes:02d}:{seconds:02d}.{millis:03d}"
 
 
+def _escape_table_cell(value: str) -> str:
+    """
+    Neutralise markdown table syntax in cell content.
+
+    Screen metadata comes from an LLM response and isn't sanitised upstream —
+    a literal `|` splits the row into extra columns, and a literal newline
+    terminates it early, both corrupting every row that follows.
+    """
+    return value.replace("\r\n", " ").replace("\n", " ").replace("\r", " ").replace("|", "\\|")
+
+
 def generate_report(session: JourneySession, output_path: Path) -> None:
     """
     Write a markdown event log to output_path.
@@ -53,7 +64,8 @@ def generate_report(session: JourneySession, output_path: Path) -> None:
         edge = edge_by_dest.get(screen.screen_id)
         action = edge.interaction_label if edge else screen.inferred_action or "*(session start)*"
         elements = ", ".join(screen.ui_elements[:5]) if screen.ui_elements else "—"
-        lines.append(f"| {ts} | {screen_name} | {app} | {action} | {elements} |")
+        cells = (_escape_table_cell(c) for c in (ts, screen_name, app, action, elements))
+        lines.append("| " + " | ".join(cells) + " |")
 
     lines += [
         f"",

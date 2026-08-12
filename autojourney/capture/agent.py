@@ -133,27 +133,48 @@ def save_frames(
     source: Iterator[tuple[np.ndarray, int, int]],
     output_dir: Path | None = None,
     progress_callback: Callable[[int], None] | None = None,
+    swallow_interrupt: bool = False,
 ) -> tuple[Path, list[dict]]:
     """
     Consume a frame iterator, write PNGs to disk, and return
     (frames_dir, manifest_list).
 
     manifest_list entries: {"index": int, "timestamp_ms": int, "path": str}
+
+    A KeyboardInterrupt during capture no longer discards everything captured
+    so far — the manifest is written for whatever frames were saved before
+    the interrupt, via `finally`, regardless of how the loop above ends.
+
+    swallow_interrupt: if True, the interrupt is treated as "stop capturing,
+    continue with what's captured" rather than an abort, and this function
+    returns normally instead of propagating it. This is the live-USB
+    workflow, where Ctrl+C is the documented way to end a capture session —
+    file-based capture still aborts on Ctrl+C as a batch job normally would,
+    just without losing the frames already written to disk.
     """
     frames_dir = (output_dir or config.OUTPUT_DIR) / "frames"
     frames_dir.mkdir(parents=True, exist_ok=True)
 
     manifest: list[dict] = []
+    interrupted = False
 
-    for frame, index, ts in source:
-        fname = frames_dir / f"frame_{index:06d}.png"
-        cv2.imwrite(str(fname), frame)
-        entry = {"index": index, "timestamp_ms": ts, "path": str(fname)}
-        manifest.append(entry)
-        if progress_callback:
-            progress_callback(index)
+    try:
+        for frame, index, ts in source:
+            fname = frames_dir / f"frame_{index:06d}.png"
+            cv2.imwrite(str(fname), frame)
+            entry = {"index": index, "timestamp_ms": ts, "path": str(fname)}
+            manifest.append(entry)
+            if progress_callback:
+                progress_callback(index)
+    except KeyboardInterrupt:
+        interrupted = True
+        log.warning("Capture interrupted — %d frame(s) captured before the stop", len(manifest))
+    finally:
+        manifest_path = frames_dir / "manifest.json"
+        manifest_path.write_text(json.dumps(manifest, indent=2))
+        log.info("Saved %d frames → %s", len(manifest), frames_dir)
 
-    manifest_path = frames_dir / "manifest.json"
-    manifest_path.write_text(json.dumps(manifest, indent=2))
-    log.info("Saved %d frames → %s", len(manifest), frames_dir)
+    if interrupted and not swallow_interrupt:
+        raise KeyboardInterrupt("Capture interrupted by user")
+
     return frames_dir, manifest

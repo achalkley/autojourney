@@ -60,7 +60,7 @@ def cli() -> None:
 )
 @click.option(
     "--fps",
-    type=float,
+    type=click.FloatRange(min=0, min_open=True),
     default=5.0,
     show_default=True,
     help="Frames per second to sample from the video.",
