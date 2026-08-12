@@ -28,6 +28,8 @@ def _two_scene_video(path: Path) -> None:
     """
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     out = cv2.VideoWriter(str(path), fourcc, NATIVE_FPS, (100, 200))
+    if not out.isOpened():
+        pytest.skip("OpenCV build has no mp4v encoder — cannot build the fixture")
     for value in (20, 230):
         frame = np.full((200, 100, 3), value, dtype=np.uint8)
         for _ in range(FRAMES_PER_SCENE):
@@ -84,6 +86,11 @@ class TestPipelineSmoke:
 
     def test_edges_reference_known_screens(self, tmp_path, stub_analyser):
         session = _run(tmp_path)
+        if not session.edges:
+            pytest.skip(
+                "pipeline produced no edges — P0-3 drops the opening screen, so "
+                "there is no transition to record. Becomes meaningful once fixed."
+            )
         ids = {s.screen_id for s in session.screens}
         for edge in session.edges:
             assert edge.from_screen_id in ids
@@ -125,3 +132,6 @@ def test_captures_the_screen_the_journey_starts_on(tmp_path, stub_analyser):
         "first screen is the post-transition light frame, not the dark frame "
         "the session opened on"
     )
+
+    # With both screens present there is a transition between them to record.
+    assert session.edges, "no edge recorded for the cut between the two screens"

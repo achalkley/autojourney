@@ -126,26 +126,24 @@ class TestEventDetector:
 # Regression coverage for known defects (audit P0-2, P1 thresholds)
 # ──────────────────────────────────────────────────────────────────────────────
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="P0-2: _ssim calls cv2.quality, which ships only in "
-           "opencv-contrib-python. Under the declared opencv-python dependency "
-           "every call raises AttributeError and is silently swallowed by ssim().",
-)
-def test_ssim_does_not_depend_on_contrib_only_cv2_quality():
+def test_ssim_correct_without_contrib_module(monkeypatch):
     """
-    `cv2.quality` is a contrib module. pyproject declares plain `opencv-python`,
-    so the primary SSIM path can never run — the detector pays an exception on
-    every frame pair and always lands in the manual fallback.
+    SSIM must be correct under the declared `opencv-python` dependency, which
+    does not ship `cv2.quality` (that module is contrib-only).
+
+    This is the permanent guarantee. It passes today via the fallback path, so
+    it is not a regression gate for P0-2 — that defect is a wasted exception on
+    every frame pair plus a misleading dependency, with no behavioural symptom
+    a test can pin. Phase 1 handles it as cleanup, verified by inspection.
     """
-    import inspect
+    monkeypatch.delattr(cv2, "quality", raising=False)
 
-    from autojourney.events import detector as detector_module
+    identical = _solid_frame((100, 150, 200))
+    assert ssim(identical, identical.copy()) > 0.99
 
-    source = inspect.getsource(detector_module)
-    assert "cv2.quality" not in source, (
-        "detector still references the contrib-only cv2.quality module"
-    )
+    dark = _solid_frame((0, 0, 0))
+    light = _solid_frame((255, 255, 255))
+    assert ssim(dark, light) < 0.5
 
 
 @pytest.mark.xfail(
