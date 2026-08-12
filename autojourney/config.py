@@ -30,13 +30,10 @@ OPENAI_API_KEY: str | None = os.getenv("OPENAI_API_KEY")
 ANTHROPIC_API_KEY: str | None = os.getenv("ANTHROPIC_API_KEY")
 
 # Figma
-# The remote MCP server (auth is OAuth, done once via browser — no token to configure)
-FIGMA_MCP_SERVER_URL: str = os.getenv("FIGMA_MCP_SERVER_URL", "https://mcp.figma.com/mcp")
+# Publishing goes through a local Figma plugin (see figma/publisher.py) — no
+# token or OAuth to configure.
 FIGMA_FILE_KEY: str = os.getenv("FIGMA_FILE_KEY", "")
 FIGMA_PAGE_NAME: str = os.getenv("FIGMA_PAGE_NAME", "AutoJourney")
-FIGMA_OAUTH_TOKEN_CACHE: Path = Path(
-    os.getenv("FIGMA_OAUTH_TOKEN_CACHE", str(Path.home() / ".config" / "autojourney" / "figma_oauth.json"))
-)
 
 # Output
 OUTPUT_DIR: Path = Path(os.getenv("OUTPUT_DIR", "./output"))

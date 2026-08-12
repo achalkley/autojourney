@@ -59,8 +59,15 @@ Outputs land under `OUTPUT_DIR` (default `./output`): `frames/`, `frames/manifes
 
 ### Figma publishing
 
-Publishing targets Figma's **remote** MCP server (`https://mcp.figma.com/mcp`), which is OAuth-only — there is no API token. The first publish opens a browser; the token is cached to `~/.config/autojourney/figma_oauth.json` and refreshed after that.
+Publishing does **not** go through Figma's MCP server. The remote server's OAuth dynamic-client-registration endpoint 403s for any client not listed in Figma's MCP Catalog (AutoJourney isn't), and the local desktop MCP server doesn't expose `use_figma`/`upload_assets` — the only tools that can write canvas content. Neither path works.
 
-The remote server exposes no REST-style node-creation surface. All writes go through a single `use_figma` tool that executes JavaScript against the Figma Plugin API, so `publisher.py` builds that JavaScript as strings (`_ensure_page_script`, `_create_screens_script`, `_connectors_script`) and interpolates data with `json.dumps`. Screens are created in small batches rather than one call, per Figma's guidance. Connector nodes are FigJam-only, so screen-to-screen edges are drawn as arrow-capped vector paths instead.
+Instead, `figma/publisher.py` drives an actual Figma Plugin at `autojourney/figma_plugin/` (`manifest.json`, `code.js`, `ui.html`), run manually by the user inside their own Figma session — no OAuth, no catalog gate. The split exists because of a hard Plugin API restriction: `code.js` (the main sandbox) has full document/scene-graph access but no network access; `ui.html` (an iframe shown via `figma.showUI`) has network access but no document access. So:
 
-The module imports `httpx2` (pulled in transitively by `mcp`), not `httpx`.
+- `publisher.py` builds a plain-JSON spec (`_build_spec`) and starts `figma/plugin_server.py`'s `PluginBridgeServer` — a local `HTTPServer` serving `GET /spec`, `GET /image/<screen_id>`, and receiving `POST /progress` / `POST /complete`.
+- `ui.html` fetches `/spec` and each screen's image bytes, then `postMessage`s them to `code.js`.
+- `code.js` creates the page/frames/labels, calls `figma.createImage(bytes)` to place each screenshot directly (no separate upload-URL round trip), draws connectors, and posts `progress`/`complete` back through `ui.html` to the bridge server.
+- `publish_to_figma()` blocks on `PluginBridgeServer.wait_for_completion()` until the plugin posts `/complete` (or times out).
+
+The bridge server's port (`PLUGIN_BRIDGE_PORT` in `plugin_server.py`) must stay in sync with `figma_plugin/manifest.json`'s `networkAccess.devAllowedDomains` — it's a static asset, not templated. Connector nodes are FigJam-only, so screen-to-screen edges are drawn as arrow-capped vector paths instead.
+
+`figma_plugin/` ships as package data (`[tool.setuptools.package-data]` in `pyproject.toml`) — its manifest path is resolved at runtime via `importlib.resources.files("autojourney.figma_plugin")` and printed for the user's one-time "Import plugin from manifest" step.

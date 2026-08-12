@@ -1,0 +1,14 @@
+{
+  "name": "AutoJourney",
+  "id": "1234567890123456789",
+  "api": "1.0.0",
+  "editorType": ["figma"],
+  "main": "code.js",
+  "ui": "ui.html",
+  "documentAccess": "dynamic-page",
+  "networkAccess": {
+    "allowedDomains": ["none"],
+    "devAllowedDomains": ["http://localhost:8934"],
+    "reasoning": "Fetches the journey session spec and screen images from the local autojourney CLI process during a publish run."
+  }
+}

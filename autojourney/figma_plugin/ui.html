@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8" /></head>
+<body>
+<script>
+// Only this iframe can reach the network (Figma Plugin API restriction) — it
+// fetches the spec/images from the local bridge server and relays them to
+// code.js via postMessage, then relays code.js's progress/completion back
+// to the bridge server the same way.
+const BRIDGE = "http://localhost:8934";
+
+async function main() {
+  try {
+    const spec = await (await fetch(BRIDGE + "/spec")).json();
+    const images = {};
+    for (const screen of spec.screens) {
+      const res = await fetch(BRIDGE + "/image/" + encodeURIComponent(screen.id));
+      const buf = await res.arrayBuffer();
+      images[screen.id] = Array.from(new Uint8Array(buf));
+    }
+    parent.postMessage({ pluginMessage: { type: "build", spec, images } }, "*");
+  } catch (err) {
+    parent.postMessage({ pluginMessage: { type: "fetch-error", error: String(err) } }, "*");
+  }
+}
+
+window.onmessage = async (event) => {
+  const msg = event.data && event.data.pluginMessage;
+  if (!msg) return;
+  if (msg.type === "progress") {
+    await fetch(BRIDGE + "/progress", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ done: msg.done, total: msg.total, detail: msg.detail }),
+    }).catch(() => {});
+  } else if (msg.type === "complete") {
+    await fetch(BRIDGE + "/complete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ success: msg.success, error: msg.error }),
+    }).catch(() => {});
+  }
+};
+
+main();
+</script>
+</body>
+</html>
