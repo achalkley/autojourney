@@ -120,3 +120,48 @@ class TestEventDetector:
         detector = EventDetector([], tmp_path)
         events = list(detector.detect())
         assert events == []
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Regression coverage for known defects (audit P0-2, P1 thresholds)
+# ──────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="P0-2: _ssim calls cv2.quality, which ships only in "
+           "opencv-contrib-python. Under the declared opencv-python dependency "
+           "every call raises AttributeError and is silently swallowed by ssim().",
+)
+def test_ssim_does_not_depend_on_contrib_only_cv2_quality():
+    """
+    `cv2.quality` is a contrib module. pyproject declares plain `opencv-python`,
+    so the primary SSIM path can never run — the detector pays an exception on
+    every frame pair and always lands in the manual fallback.
+    """
+    import inspect
+
+    from autojourney.events import detector as detector_module
+
+    source = inspect.getsource(detector_module)
+    assert "cv2.quality" not in source, (
+        "detector still references the contrib-only cv2.quality module"
+    )
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="P1: __init__ uses `arg or config.DEFAULT`, so an explicit 0.0 is "
+           "falsy and gets replaced by the config default.",
+)
+def test_explicit_zero_thresholds_are_respected(tmp_path):
+    """0.0 is a legitimate threshold (disable the check), not 'unset'."""
+    detector = EventDetector(
+        [],
+        tmp_path,
+        transition_ssim=0.0,
+        transition_area=0.0,
+        scroll_flow=0.0,
+    )
+    assert detector.transition_ssim == 0.0
+    assert detector.transition_area == 0.0
+    assert detector.scroll_flow == 0.0
