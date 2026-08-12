@@ -185,9 +185,12 @@ def run_pipeline(
         # Backfill transition edge labels now that we know screen names
         if i > 0:
             edge = session.edges[i - 1] if i - 1 < len(session.edges) else None
-            if edge and (not edge.interaction_label or edge.interaction_label == EventType.TRANSITION.value):
-                if screen.inferred_action:
-                    edge.interaction_label = screen.inferred_action
+            if (
+                edge
+                and (not edge.interaction_label or edge.interaction_label == EventType.TRANSITION.value)
+                and screen.inferred_action
+            ):
+                edge.interaction_label = screen.inferred_action
 
     # Persist session JSON
     session_path = out / "session.json"
@@ -240,7 +243,7 @@ def run_pipeline(
                 progress_callback=lambda done, total, msg: progress("figma", f"[{done}/{total}] {msg}"),
             )
             progress("figma", f"Published: {figma_url}")
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — a publish failure shouldn't discard an otherwise-complete local session
             log.error("Figma publish failed: %s", exc)
             progress("figma", f"ERROR: {exc}")
     else:

@@ -14,7 +14,7 @@ mypy autojourney
 
 Without an editable install, `pytest` fails at collection — there is no `conftest.py` and the test files have no `__init__.py`, so pytest puts `tests/` on `sys.path` rather than the repo root and `import autojourney` fails. Use `python -m pytest` (which prepends the cwd) if you need to run against a bare checkout.
 
-Neither `ruff` nor `mypy` is wired into a CI gate, and the tree does not currently pass `ruff check`.
+CI (`.github/workflows/ci.yml`) runs `ruff check .` and `pytest` as hard gates on push/PR to `main`. `mypy autojourney` also runs but is advisory (`continue-on-error`) — the tree has pre-existing `cv2`-stub-shaped errors (`calcOpticalFlowFarneback` overload mismatches, `Optional` propagation through `stitcher/scroll.py` from `cv2.imread`'s `None` return) that aren't fixed yet. Deliberate `ruff` exceptions (a handful of intentionally broad `except Exception` fallbacks, one dependent triple `async with`) are silenced with scoped inline `# noqa: <CODE>` comments, not a blanket per-rule ignore, so the rule stays live everywhere else.
 
 The `capture` extra (`pip install -e '.[capture]'`) is only needed for live USB capture; everything else works from a recorded video.
 

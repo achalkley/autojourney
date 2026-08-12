@@ -356,96 +356,98 @@ async def _publish_async(
     oauth_auth = _build_oauth_provider(server_url)
 
     log.info("Connecting to Figma MCP server: %s", server_url)
-    async with httpx2.AsyncClient(auth=oauth_auth, follow_redirects=True) as http_client:
-        async with streamable_http_client(url=server_url, http_client=http_client) as (read_stream, write_stream):
-            async with ClientSession(read_stream, write_stream) as mcp_session:
-                await mcp_session.initialize()
+    async with (
+        httpx2.AsyncClient(auth=oauth_auth, follow_redirects=True) as http_client,
+        streamable_http_client(url=server_url, http_client=http_client) as (read_stream, write_stream),
+        ClientSession(read_stream, write_stream) as mcp_session,
+    ):
+        await mcp_session.initialize()
 
-                log.info("Publishing journey map to Figma (file: %s, page: %s)", file_key, target_page)
-                page_result = await _call_tool(mcp_session, "use_figma", {
-                    "fileKey": file_key,
-                    "code": _ensure_page_script(target_page),
-                    "description": f"Ensure Figma page '{target_page}' exists for the journey map",
-                    "skillNames": "figma-use",
+        log.info("Publishing journey map to Figma (file: %s, page: %s)", file_key, target_page)
+        page_result = await _call_tool(mcp_session, "use_figma", {
+            "fileKey": file_key,
+            "code": _ensure_page_script(target_page),
+            "description": f"Ensure Figma page '{target_page}' exists for the journey map",
+            "skillNames": "figma-use",
+        })
+        page_id = page_result["pageId"]
+
+        if layout:
+            min_x = min(x for x, _ in layout.values())
+            min_y = min(y for _, y in layout.values())
+            layout = {n: (x - min_x + 100, y - min_y + 100) for n, (x, y) in layout.items()}
+
+        screen_map = {s.screen_id: s for s in session.screens}
+        node_map: dict[str, str] = {}
+        total = len(session.screens)
+        done = 0
+
+        for batch_start in range(0, len(session.screens), SCREENS_PER_BATCH):
+            batch = session.screens[batch_start:batch_start + SCREENS_PER_BATCH]
+            specs = []
+            for i, screen in enumerate(batch, start=batch_start):
+                lx, ly = layout.get(screen.screen_id, (i * (FRAME_W + H_GAP) + 100, 100))
+                frame_h = FRAME_H
+                try:
+                    import cv2
+                    img = cv2.imread(str(screen.image_path))
+                    if img is not None:
+                        native_h, native_w = img.shape[:2]
+                        frame_h = int(FRAME_W * native_h / native_w)
+                except Exception:  # noqa: BLE001, S110 — best-effort aspect-ratio read; fall back to the default frame height
+                    pass
+                frame_label = screen.screen_name or f"Screen {screen.screen_id}"
+                specs.append({
+                    "id": screen.screen_id,
+                    "name": frame_label,
+                    "x": lx,
+                    "y": ly,
+                    "w": FRAME_W,
+                    "h": frame_h,
+                    "label": f"{screen.app_name} — {screen.screen_name}" if screen.app_name else frame_label,
+                    "action": screen.inferred_action or None,
                 })
-                page_id = page_result["pageId"]
 
-                if layout:
-                    min_x = min(x for x, _ in layout.values())
-                    min_y = min(y for _, y in layout.values())
-                    layout = {n: (x - min_x + 100, y - min_y + 100) for n, (x, y) in layout.items()}
+            batch_result = await _call_tool(mcp_session, "use_figma", {
+                "fileKey": file_key,
+                "code": _create_screens_script(page_id, specs),
+                "description": f"Create {len(specs)} screen frame(s) for the journey map",
+                "skillNames": "figma-use",
+            })
+            for entry in batch_result["created"]:
+                node_map[entry["screenId"]] = entry["frameId"]
 
-                screen_map = {s.screen_id: s for s in session.screens}
-                node_map: dict[str, str] = {}
-                total = len(session.screens)
-                done = 0
+            for entry in batch_result["created"]:
+                screen = screen_map[entry["screenId"]]
+                upload_result = await _call_tool(mcp_session, "upload_assets", {
+                    "fileKey": file_key,
+                    "nodeId": entry["frameId"],
+                    "count": 1,
+                })
+                upload_url = _extract_upload_url(upload_result)
+                image_bytes = Path(screen.image_path).read_bytes()
+                upload_resp = await http_client.post(
+                    upload_url, content=image_bytes, headers={"Content-Type": "image/png"}
+                )
+                upload_resp.raise_for_status()
 
-                for batch_start in range(0, len(session.screens), SCREENS_PER_BATCH):
-                    batch = session.screens[batch_start:batch_start + SCREENS_PER_BATCH]
-                    specs = []
-                    for i, screen in enumerate(batch, start=batch_start):
-                        lx, ly = layout.get(screen.screen_id, (i * (FRAME_W + H_GAP) + 100, 100))
-                        frame_h = FRAME_H
-                        try:
-                            import cv2
-                            img = cv2.imread(str(screen.image_path))
-                            if img is not None:
-                                native_h, native_w = img.shape[:2]
-                                frame_h = int(FRAME_W * native_h / native_w)
-                        except Exception:
-                            pass
-                        frame_label = screen.screen_name or f"Screen {screen.screen_id}"
-                        specs.append({
-                            "id": screen.screen_id,
-                            "name": frame_label,
-                            "x": lx,
-                            "y": ly,
-                            "w": FRAME_W,
-                            "h": frame_h,
-                            "label": f"{screen.app_name} — {screen.screen_name}" if screen.app_name else frame_label,
-                            "action": screen.inferred_action or None,
-                        })
+                done += 1
+                if progress_callback:
+                    progress_callback(done, total, f"Placed: {screen.screen_name or screen.screen_id}")
 
-                    batch_result = await _call_tool(mcp_session, "use_figma", {
-                        "fileKey": file_key,
-                        "code": _create_screens_script(page_id, specs),
-                        "description": f"Create {len(specs)} screen frame(s) for the journey map",
-                        "skillNames": "figma-use",
-                    })
-                    for entry in batch_result["created"]:
-                        node_map[entry["screenId"]] = entry["frameId"]
-
-                    for entry in batch_result["created"]:
-                        screen = screen_map[entry["screenId"]]
-                        upload_result = await _call_tool(mcp_session, "upload_assets", {
-                            "fileKey": file_key,
-                            "nodeId": entry["frameId"],
-                            "count": 1,
-                        })
-                        upload_url = _extract_upload_url(upload_result)
-                        image_bytes = Path(screen.image_path).read_bytes()
-                        upload_resp = await http_client.post(
-                            upload_url, content=image_bytes, headers={"Content-Type": "image/png"}
-                        )
-                        upload_resp.raise_for_status()
-
-                        done += 1
-                        if progress_callback:
-                            progress_callback(done, total, f"Placed: {screen.screen_name or screen.screen_id}")
-
-                # Draw connectors between screens now that every frame exists
-                edges = [
-                    {"fromId": node_map[e.from_screen_id], "toId": node_map[e.to_screen_id], "label": e.interaction_label}
-                    for e in session.edges
-                    if e.from_screen_id in node_map and e.to_screen_id in node_map
-                ]
-                if edges:
-                    await _call_tool(mcp_session, "use_figma", {
-                        "fileKey": file_key,
-                        "code": _connectors_script(page_id, edges),
-                        "description": f"Draw {len(edges)} transition connector(s) between screens",
-                        "skillNames": "figma-use",
-                    })
+        # Draw connectors between screens now that every frame exists
+        edges = [
+            {"fromId": node_map[e.from_screen_id], "toId": node_map[e.to_screen_id], "label": e.interaction_label}
+            for e in session.edges
+            if e.from_screen_id in node_map and e.to_screen_id in node_map
+        ]
+        if edges:
+            await _call_tool(mcp_session, "use_figma", {
+                "fileKey": file_key,
+                "code": _connectors_script(page_id, edges),
+                "description": f"Draw {len(edges)} transition connector(s) between screens",
+                "skillNames": "figma-use",
+            })
 
     figma_url = f"https://www.figma.com/design/{file_key}"
     log.info("Journey map published: %s", figma_url)

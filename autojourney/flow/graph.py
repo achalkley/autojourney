@@ -79,7 +79,7 @@ def compute_tree_layout(G: nx.DiGraph) -> dict[str, tuple[float, float]]:
         # Graphviz uses bottom-up y; flip for top-down
         max_y = max(y for _, y in pos.values()) if pos else 0
         return {n: (x, max_y - y) for n, (x, y) in pos.items()}
-    except Exception:
+    except Exception:  # noqa: BLE001 — graphviz backend is optional; any failure falls through to the next layout strategy
         log.debug("pygraphviz not available; using spring layout")
 
     # Attempt hierarchical layout via topological generations
@@ -100,7 +100,7 @@ def compute_tree_layout(G: nx.DiGraph) -> dict[str, tuple[float, float]]:
                 pos[node] = (x_offset, 0)
                 x_offset += 300
         return pos
-    except Exception:
+    except Exception:  # noqa: BLE001 — final layout fallback: any failure in the hierarchy walk degrades to spring layout
         return nx.spring_layout(G, seed=42, scale=800)
 
 

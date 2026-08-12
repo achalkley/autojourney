@@ -110,6 +110,6 @@ def analyse_screen(image_path: Path) -> dict:
     except json.JSONDecodeError as exc:
         log.warning("LLM returned non-JSON for %s: %s", image_path.name, exc)
         return {"error": "json_decode", "raw": raw}
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — deliberately broad: any provider/network failure degrades to an error dict rather than aborting the pipeline
         log.error("LLM request failed for %s: %s", image_path.name, exc)
         return {"error": str(exc)}

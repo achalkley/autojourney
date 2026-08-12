@@ -130,7 +130,7 @@ def run(
             f"Session data: {out_dir / 'session.json'}",
             title="✅ Complete",
         ))
-    except Exception:
+    except Exception:  # noqa: BLE001 — top-level CLI handler: report any failure and exit non-zero
         console.print_exception()
         sys.exit(1)
 
