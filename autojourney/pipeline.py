@@ -239,7 +239,6 @@ def run_pipeline(
         try:
             figma_url = publish_to_figma(
                 session=session,
-                graph=graph,
                 layout=layout,
                 progress_callback=lambda done, total, msg: progress("figma", f"[{done}/{total}] {msg}"),
             )

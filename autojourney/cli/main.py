@@ -179,7 +179,7 @@ def publish(session_json: Path, verbose: bool) -> None:
 
     graph = build_graph(session)
     layout = compute_tree_layout(graph)
-    url = publish_to_figma(session, graph, layout)
+    url = publish_to_figma(session, layout)
     console.print(f"[green]Published:[/green] {url}")
 
 

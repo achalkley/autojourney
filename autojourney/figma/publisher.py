@@ -28,7 +28,6 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 import httpx2
-import networkx as nx
 from mcp.client.auth import AuthorizationCodeResult, OAuthClientProvider, TokenStorage
 from mcp.client.session import ClientSession
 from mcp.client.streamable_http import streamable_http_client
@@ -346,7 +345,6 @@ return {{ createdIds }};
 
 async def _publish_async(
     session: JourneySession,
-    graph: nx.DiGraph,
     layout: dict[str, tuple[float, float]],
     page_name: str | None,
     progress_callback,
@@ -456,7 +454,6 @@ async def _publish_async(
 
 def publish_to_figma(
     session: JourneySession,
-    graph: nx.DiGraph,
     layout: dict[str, tuple[float, float]],
     page_name: str | None = None,
     progress_callback=None,
@@ -467,4 +464,4 @@ def publish_to_figma(
     Returns the URL of the Figma file. On first use this opens a browser for a
     one-time OAuth authorization; subsequent calls reuse the cached token.
     """
-    return asyncio.run(_publish_async(session, graph, layout, page_name, progress_callback))
+    return asyncio.run(_publish_async(session, layout, page_name, progress_callback))
