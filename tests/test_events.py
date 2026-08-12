@@ -120,3 +120,46 @@ class TestEventDetector:
         detector = EventDetector([], tmp_path)
         events = list(detector.detect())
         assert events == []
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Regression coverage for known defects (audit P0-2, P1 thresholds)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def test_ssim_correct_without_contrib_module(monkeypatch):
+    """
+    SSIM must be correct under the declared `opencv-python` dependency, which
+    does not ship `cv2.quality` (that module is contrib-only).
+
+    This is the permanent guarantee. It passes today via the fallback path, so
+    it is not a regression gate for P0-2 — that defect is a wasted exception on
+    every frame pair plus a misleading dependency, with no behavioural symptom
+    a test can pin. Phase 1 handles it as cleanup, verified by inspection.
+    """
+    monkeypatch.delattr(cv2, "quality", raising=False)
+
+    identical = _solid_frame((100, 150, 200))
+    assert ssim(identical, identical.copy()) > 0.99
+
+    dark = _solid_frame((0, 0, 0))
+    light = _solid_frame((255, 255, 255))
+    assert ssim(dark, light) < 0.5
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="P1: __init__ uses `arg or config.DEFAULT`, so an explicit 0.0 is "
+           "falsy and gets replaced by the config default.",
+)
+def test_explicit_zero_thresholds_are_respected(tmp_path):
+    """0.0 is a legitimate threshold (disable the check), not 'unset'."""
+    detector = EventDetector(
+        [],
+        tmp_path,
+        transition_ssim=0.0,
+        transition_area=0.0,
+        scroll_flow=0.0,
+    )
+    assert detector.transition_ssim == 0.0
+    assert detector.transition_area == 0.0
+    assert detector.scroll_flow == 0.0
