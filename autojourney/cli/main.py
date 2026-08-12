@@ -71,12 +71,6 @@ def cli() -> None:
     default=False,
     help="Skip Figma publishing; only produce local output files.",
 )
-@click.option(
-    "--figma-mcp-url",
-    default="http://localhost:3000",
-    show_default=True,
-    help="Figma MCP server URL.",
-)
 @click.option("--verbose", "-v", is_flag=True, default=False)
 def run(
     source: Path | None,
@@ -84,7 +78,6 @@ def run(
     output: Path | None,
     fps: float,
     no_publish: bool,
-    figma_mcp_url: str,
     verbose: bool,
 ) -> None:
     """Run the full AutoJourney pipeline."""
@@ -126,7 +119,6 @@ def run(
         session = run_pipeline(
             video_path=source,
             output_dir=out_dir,
-            figma_mcp_url=figma_mcp_url,
             publish=not no_publish,
             fps_limit=fps,
             on_progress=on_progress,
@@ -146,14 +138,8 @@ def run(
 
 @cli.command()
 @click.argument("session_json", type=click.Path(exists=True, path_type=Path))
-@click.option(
-    "--figma-mcp-url",
-    default="http://localhost:3000",
-    show_default=True,
-    help="Figma MCP server URL.",
-)
 @click.option("--verbose", "-v", is_flag=True, default=False)
-def publish(session_json: Path, figma_mcp_url: str, verbose: bool) -> None:
+def publish(session_json: Path, verbose: bool) -> None:
     """Re-publish an existing session.json to Figma."""
     _setup_logging(verbose)
 
@@ -193,7 +179,7 @@ def publish(session_json: Path, figma_mcp_url: str, verbose: bool) -> None:
 
     graph = build_graph(session)
     layout = compute_tree_layout(graph)
-    url = publish_to_figma(session, graph, layout, mcp_base_url=figma_mcp_url)
+    url = publish_to_figma(session, graph, layout)
     console.print(f"[green]Published:[/green] {url}")
 
 
