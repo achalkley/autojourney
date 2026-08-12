@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "autojourney"
+version = "0.1.0"
+description = "Capture iOS app sessions and produce visual journey maps in Figma"
+requires-python = ">=3.9"
+dependencies = [
+    "opencv-python>=4.9",
+    "numpy>=1.26",
+    "Pillow>=10.3",
+    "openai>=1.30",          # OpenAI-compat client — used for LM Studio local API
+    "networkx>=2.8",
+    "httpx>=0.27",
+    "click>=8.1",
+    "rich>=13.7",
+    "pydantic>=2.7",
+    "python-dotenv>=1.0",
+    "ffmpeg-python>=0.2",
+]
+
+[project.optional-dependencies]
+capture = [
+    "ios-screen-record>=0.3",  # USB QuickTime capture
+]
+dev = [
+    "pytest>=8",
+    "pytest-cov",
+    "ruff",
+    "mypy",
+]
+
+[project.scripts]
+autojourney = "autojourney.cli.main:cli"
+
+[tool.setuptools.packages.find]
+where = ["."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.mypy]
+python_version = "3.9"
+strict = false

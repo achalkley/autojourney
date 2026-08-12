@@ -1,0 +1,239 @@
+"""
+Event detection — analyses a sequence of frames and emits FrameEvents.
+
+Detection strategy:
+  - Screen transition: SSIM drops below threshold AND changed area fraction
+    exceeds minimum. Indicates a full page/screen change.
+  - Modal/overlay: Partial SSIM drop concentrated in a region (upper half
+    stays stable, lower half or centre changes significantly).
+  - Content update: Moderate partial change that doesn't meet transition
+    criteria (e.g. data refresh, badge update).
+  - Scroll: Optical flow shows dominant vertical or horizontal translation
+    with low divergence (the content is moving uniformly in one direction).
+"""
+from __future__ import annotations
+
+import json
+import logging
+from pathlib import Path
+from typing import Generator
+
+import cv2
+import numpy as np
+
+from autojourney import config
+from autojourney.models import EventType, FrameEvent
+
+log = logging.getLogger(__name__)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# SSIM helper (single-channel)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _ssim(a: np.ndarray, b: np.ndarray) -> float:
+    """Fast structural similarity on grayscale images (OpenCV)."""
+    a = cv2.cvtColor(a, cv2.COLOR_BGR2GRAY) if a.ndim == 3 else a
+    b = cv2.cvtColor(b, cv2.COLOR_BGR2GRAY) if b.ndim == 3 else b
+    if a.shape != b.shape:
+        b = cv2.resize(b, (a.shape[1], a.shape[0]))
+    # Use Gaussian-weighted SSIM via OpenCV
+    score, _ = cv2.quality.QualitySSIM_compute(  # type: ignore[attr-defined]
+        a[:, :, np.newaxis] if a.ndim == 2 else a,
+        b[:, :, np.newaxis] if b.ndim == 2 else b,
+    )
+    # Falls back to manual formula if OpenCV quality module unavailable
+    return float(np.mean(score))
+
+
+def _ssim_manual(a: np.ndarray, b: np.ndarray) -> float:
+    """Manual SSIM fallback (grayscale)."""
+    a = cv2.cvtColor(a, cv2.COLOR_BGR2GRAY).astype(np.float64) if a.ndim == 3 else a.astype(np.float64)
+    b = cv2.cvtColor(b, cv2.COLOR_BGR2GRAY).astype(np.float64) if b.ndim == 3 else b.astype(np.float64)
+    if a.shape != b.shape:
+        b = cv2.resize(b.astype(np.float32), (a.shape[1], a.shape[0])).astype(np.float64)
+
+    C1, C2 = 6.5025, 58.5225  # (k1*255)^2, (k2*255)^2
+    mu1 = cv2.GaussianBlur(a, (11, 11), 1.5)
+    mu2 = cv2.GaussianBlur(b, (11, 11), 1.5)
+    mu1_sq, mu2_sq, mu1_mu2 = mu1 ** 2, mu2 ** 2, mu1 * mu2
+    sigma1_sq = cv2.GaussianBlur(a * a, (11, 11), 1.5) - mu1_sq
+    sigma2_sq = cv2.GaussianBlur(b * b, (11, 11), 1.5) - mu2_sq
+    sigma12 = cv2.GaussianBlur(a * b, (11, 11), 1.5) - mu1_mu2
+    num = (2 * mu1_mu2 + C1) * (2 * sigma12 + C2)
+    den = (mu1_sq + mu2_sq + C1) * (sigma1_sq + sigma2_sq + C2)
+    return float(np.mean(num / den))
+
+
+def ssim(a: np.ndarray, b: np.ndarray) -> float:
+    try:
+        return _ssim(a, b)
+    except Exception:
+        return _ssim_manual(a, b)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Changed-area fraction
+# ──────────────────────────────────────────────────────────────────────────────
+
+def changed_area_fraction(a: np.ndarray, b: np.ndarray, threshold: int = 30) -> float:
+    """Fraction of pixels that differ by more than `threshold` in any channel."""
+    if a.shape != b.shape:
+        b = cv2.resize(b, (a.shape[1], a.shape[0]))
+    diff = cv2.absdiff(a, b)
+    mask = np.any(diff > threshold, axis=2)
+    return float(mask.sum()) / mask.size
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Optical flow — scroll detection
+# ──────────────────────────────────────────────────────────────────────────────
+
+def dominant_flow(a: np.ndarray, b: np.ndarray) -> tuple[float, float]:
+    """
+    Returns (mean_dx, mean_dy) of dense optical flow between frames.
+    A dominant vertical flow with low divergence suggests a scroll.
+    """
+    g1 = cv2.cvtColor(cv2.resize(a, (320, 568)), cv2.COLOR_BGR2GRAY)
+    g2 = cv2.cvtColor(cv2.resize(b, (320, 568)), cv2.COLOR_BGR2GRAY)
+    flow = cv2.calcOpticalFlowFarneback(g1, g2, None, 0.5, 3, 15, 3, 5, 1.2, 0)
+    return float(np.median(flow[..., 0])), float(np.median(flow[..., 1]))
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Modal heuristic — stable top + changing centre/bottom
+# ──────────────────────────────────────────────────────────────────────────────
+
+def is_modal(a: np.ndarray, b: np.ndarray) -> bool:
+    """True if the top quarter is stable but the lower 60% changed significantly."""
+    h = a.shape[0]
+    top_quarter = slice(0, h // 4)
+    lower = slice(h // 4, h)
+    top_ssim = ssim(a[top_quarter], b[top_quarter])
+    lower_change = changed_area_fraction(a[lower], b[lower])
+    return top_ssim > 0.90 and lower_change > 0.20
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Main event detector
+# ──────────────────────────────────────────────────────────────────────────────
+
+class EventDetector:
+    """
+    Iterates over a manifest of frame paths and yields FrameEvents.
+
+    Usage:
+        detector = EventDetector(manifest, frames_dir)
+        for event in detector.detect():
+            process(event)
+    """
+
+    def __init__(
+        self,
+        manifest: list[dict],
+        frames_dir: Path,
+        transition_ssim: float | None = None,
+        transition_area: float | None = None,
+        scroll_flow: float | None = None,
+    ) -> None:
+        self.manifest = manifest
+        self.frames_dir = frames_dir
+        self.transition_ssim = transition_ssim or config.TRANSITION_SSIM_THRESHOLD
+        self.transition_area = transition_area or config.TRANSITION_AREA_FRACTION
+        self.scroll_flow = scroll_flow or config.SCROLL_FLOW_THRESHOLD
+
+    def _load(self, entry: dict) -> np.ndarray:
+        path = Path(entry["path"])
+        frame = cv2.imread(str(path))
+        if frame is None:
+            raise RuntimeError(f"Cannot read frame: {path}")
+        return frame
+
+    def detect(self) -> Generator[FrameEvent, None, None]:
+        if not self.manifest:
+            return
+
+        scroll_accumulator: list[dict] = []
+        in_scroll = False
+
+        prev_entry = self.manifest[0]
+        prev_frame = self._load(prev_entry)
+
+        for entry in self.manifest[1:]:
+            curr_frame = self._load(entry)
+            ts = entry["timestamp_ms"]
+            idx = entry["index"]
+
+            s = ssim(prev_frame, curr_frame)
+            area = changed_area_fraction(prev_frame, curr_frame)
+            dx, dy = dominant_flow(prev_frame, curr_frame)
+            flow_mag = (dx ** 2 + dy ** 2) ** 0.5
+
+            is_scroll_motion = flow_mag > self.scroll_flow and (abs(dy) > abs(dx) * 1.5 or abs(dx) > abs(dy) * 1.5)
+            is_transition_change = s < self.transition_ssim and area > self.transition_area
+
+            if is_scroll_motion:
+                if not in_scroll:
+                    in_scroll = True
+                    scroll_accumulator = [prev_entry]
+                    yield FrameEvent(
+                        event_type=EventType.SCROLL_START,
+                        timestamp_ms=ts,
+                        frame_index=idx,
+                        before_frame_path=Path(prev_entry["path"]),
+                        metadata={"dx": dx, "dy": dy},
+                    )
+                scroll_accumulator.append(entry)
+            else:
+                if in_scroll:
+                    in_scroll = False
+                    yield FrameEvent(
+                        event_type=EventType.SCROLL_END,
+                        timestamp_ms=ts,
+                        frame_index=idx,
+                        scroll_frame_paths=[Path(e["path"]) for e in scroll_accumulator],
+                        metadata={"frame_count": len(scroll_accumulator)},
+                    )
+                    scroll_accumulator = []
+
+                if is_transition_change:
+                    if is_modal(prev_frame, curr_frame):
+                        evt_type = EventType.MODAL
+                    else:
+                        evt_type = EventType.TRANSITION
+                    yield FrameEvent(
+                        event_type=evt_type,
+                        timestamp_ms=ts,
+                        frame_index=idx,
+                        before_frame_path=Path(prev_entry["path"]),
+                        after_frame_path=Path(entry["path"]),
+                        metadata={"ssim": s, "changed_area": area},
+                    )
+                elif area > 0.05:
+                    yield FrameEvent(
+                        event_type=EventType.CONTENT_UPDATE,
+                        timestamp_ms=ts,
+                        frame_index=idx,
+                        before_frame_path=Path(prev_entry["path"]),
+                        after_frame_path=Path(entry["path"]),
+                        metadata={"ssim": s, "changed_area": area},
+                    )
+
+            prev_entry = entry
+            prev_frame = curr_frame
+
+        # Close any open scroll at end of video
+        if in_scroll and scroll_accumulator:
+            yield FrameEvent(
+                event_type=EventType.SCROLL_END,
+                timestamp_ms=self.manifest[-1]["timestamp_ms"],
+                frame_index=self.manifest[-1]["index"],
+                scroll_frame_paths=[Path(e["path"]) for e in scroll_accumulator],
+                metadata={"frame_count": len(scroll_accumulator)},
+            )
+
+        yield FrameEvent(
+            event_type=EventType.VIDEO_END,
+            timestamp_ms=self.manifest[-1]["timestamp_ms"],
+            frame_index=self.manifest[-1]["index"],
+        )
