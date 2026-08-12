@@ -17,6 +17,7 @@ Works best with:
 from __future__ import annotations
 
 import logging
+from itertools import pairwise
 from pathlib import Path
 
 import cv2
@@ -91,7 +92,7 @@ def _detect_scroll_direction(frames: list[np.ndarray]) -> str:
         return "vertical"
 
     v_total = h_total = 0.0
-    for a, b in list(zip(frames, frames[1:], strict=False))[:DIRECTION_SAMPLE_PAIRS]:
+    for a, b in list(pairwise(frames))[:DIRECTION_SAMPLE_PAIRS]:
         v_total += _match(a, b, "vertical")[0]
         h_total += _match(a, b, "horizontal")[0]
     return "vertical" if v_total >= h_total else "horizontal"

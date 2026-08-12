@@ -57,7 +57,8 @@ class TestComputeTreeLayout:
             assert isinstance(y, (int, float))
 
     def test_empty_graph_returns_empty(self):
-        from autojourney.flow.graph import compute_tree_layout
         import networkx as nx
+
+        from autojourney.flow.graph import compute_tree_layout
         layout = compute_tree_layout(nx.DiGraph())
         assert layout == {}

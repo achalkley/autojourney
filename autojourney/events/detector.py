@@ -13,10 +13,9 @@ Detection strategy:
 """
 from __future__ import annotations
 
-import json
 import logging
+from collections.abc import Generator
 from pathlib import Path
-from typing import Generator
 
 import cv2
 import numpy as np

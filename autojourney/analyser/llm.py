@@ -105,8 +105,7 @@ def analyse_screen(image_path: Path) -> dict:
         raw = raw.strip()
         if raw.startswith("```"):
             raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
+            raw = raw.removeprefix("json")
         return json.loads(raw.strip())
     except json.JSONDecodeError as exc:
         log.warning("LLM returned non-JSON for %s: %s", image_path.name, exc)

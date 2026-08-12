@@ -8,11 +8,10 @@ to be the same view (based on app_name + screen_name match).
 from __future__ import annotations
 
 import logging
-from collections import defaultdict
 
 import networkx as nx
 
-from autojourney.models import FlowEdge, JourneySession, Screen
+from autojourney.models import JourneySession, Screen
 
 log = logging.getLogger(__name__)
 
@@ -76,7 +75,6 @@ def compute_tree_layout(G: nx.DiGraph) -> dict[str, tuple[float, float]]:
         return {}
 
     try:
-        import pygraphviz  # type: ignore[import]
         pos = nx.nx_agraph.graphviz_layout(G, prog="dot")
         # Graphviz uses bottom-up y; flip for top-down
         max_y = max(y for _, y in pos.values()) if pos else 0

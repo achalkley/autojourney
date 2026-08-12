@@ -4,7 +4,6 @@ Tests for capture agent helpers.
 from __future__ import annotations
 
 import json
-import tempfile
 from pathlib import Path
 
 import cv2
@@ -61,7 +60,7 @@ class TestSaveFrames:
         def fake_source():
             yield np.zeros((100, 50, 3), dtype=np.uint8), 0, 0
 
-        frames_dir, manifest = save_frames(fake_source(), output_dir=tmp_path)
+        frames_dir, _manifest = save_frames(fake_source(), output_dir=tmp_path)
         manifest_path = frames_dir / "manifest.json"
         assert manifest_path.exists()
 

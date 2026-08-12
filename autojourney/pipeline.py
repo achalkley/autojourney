@@ -11,10 +11,8 @@ import json
 import logging
 import shutil
 import uuid
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
-
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
 
 from autojourney import config
 from autojourney.analyser.llm import analyse_screen
@@ -115,7 +113,6 @@ def run_pipeline(
     screens_dir = out / "screens"
     screens_dir.mkdir(exist_ok=True)
 
-    scroll_buffer: list[Path] = []
     screen_index = 0
     prev_screen_id: str | None = None
 

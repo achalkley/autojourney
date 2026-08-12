@@ -3,8 +3,6 @@ Tests for event detection.
 """
 from __future__ import annotations
 
-import json
-import tempfile
 from pathlib import Path
 
 import cv2
@@ -13,7 +11,6 @@ import numpy as np
 from autojourney.events.detector import (
     EventDetector,
     changed_area_fraction,
-    dominant_flow,
     is_modal,
     ssim,
 )
