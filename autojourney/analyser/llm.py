@@ -54,7 +54,10 @@ def _build_client() -> tuple[OpenAI, str]:
     else:
         # Default: LM Studio local server
         client = OpenAI(
-            api_key="lm-studio",  # LM Studio ignores the key value
+            # LM Studio ignores this by default; if its optional "require API
+            # key" server setting is enabled, set LM_STUDIO_API_KEY to send it
+            # as a real bearer token instead.
+            api_key=config.LM_STUDIO_API_KEY or "lm-studio",
             base_url=config.LM_STUDIO_BASE_URL,
         )
         model = config.LM_STUDIO_MODEL
