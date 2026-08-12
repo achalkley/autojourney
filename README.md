@@ -27,7 +27,7 @@ iOS Device (USB)
 - Python 3.11+
 - macOS (for iOS USB capture)
 - [LM Studio](https://lmstudio.ai/) with a vision-capable model loaded (e.g. LLaVA-Next)
-- A Figma account — publishing uses [Figma's remote MCP server](https://developers.figma.com/docs/figma-mcp-server/) (`https://mcp.figma.com/mcp`); nothing to install or run locally, just a one-time browser sign-in on first publish
+- Figma desktop app — publishing runs as a local Figma Plugin inside your own session (see [Figma publishing](#figma-publishing) below)
 - For live USB capture: `pip install 'autojourney[capture]'`
 
 ## Setup
@@ -53,10 +53,28 @@ If you've enabled LM Studio's optional "require API key" server setting, also se
 `LM_STUDIO_API_KEY` in `.env` — leave it unset for the default unauthenticated
 local server.
 
-No Figma token or local server to set up — the first `autojourney run` (or `publish`)
-opens a browser to authorize AutoJourney against your Figma account via OAuth. The
-resulting token is cached to `~/.config/autojourney/figma_oauth.json` and reused
-(and refreshed) on later runs.
+### Figma publishing
+
+Figma's remote MCP server only accepts clients listed in its MCP Catalog, and its
+local desktop MCP server doesn't expose the tools needed to create nodes — so
+publishing runs as an actual Figma Plugin inside your own session instead. No
+token, no OAuth.
+
+One-time setup:
+
+1. Open the Figma desktop app.
+2. **Plugins → Development → Import plugin from manifest…**
+3. Select the manifest AutoJourney prints on first publish (or find it yourself
+   at `<path-to-your-venv>/lib/python*/site-packages/autojourney/figma_plugin/manifest.json`,
+   or `autojourney/figma_plugin/manifest.json` in an editable install).
+
+Each publish:
+
+1. Run `autojourney run` or `autojourney publish` (below) — it starts a small
+   local server and opens the target file in your browser.
+2. In the Figma desktop app, open that file and run
+   **Plugins → Development → AutoJourney**.
+3. The CLI finishes automatically once the plugin reports it's done.
 
 ## Usage
 

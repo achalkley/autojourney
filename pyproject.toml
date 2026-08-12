@@ -12,8 +12,6 @@ dependencies = [
     "numpy>=1.26",
     "openai>=1.30",          # OpenAI-compat client — used for LM Studio local API
     "networkx>=2.8",
-    "httpx2>=2.5",             # not httpx — Figma publisher imports httpx2 directly (mcp's transport dep)
-    "mcp>=2.0",               # Figma's remote MCP server — OAuth + Streamable HTTP client
     "click>=8.1",
     "rich>=13.7",
     "python-dotenv>=1.0",
@@ -35,6 +33,9 @@ autojourney = "autojourney.cli.main:cli"
 
 [tool.setuptools.packages.find]
 where = ["."]
+
+[tool.setuptools.package-data]
+"autojourney.figma_plugin" = ["*.json", "*.js", "*.html"]
 
 [tool.ruff]
 line-length = 100
