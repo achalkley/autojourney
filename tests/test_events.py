@@ -207,3 +207,99 @@ class TestUnreadableFrames:
         events = list(detector.detect())  # must not raise
         assert len(events) == 1
         assert events[0].event_type == EventType.VIDEO_END
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Regression coverage for known defects (audit Phase 4: optical-flow early-out)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _tall_noise_page(page_h: int, w: int, block: int = 20, seed: int = 11) -> np.ndarray:
+    """Smooth, non-repeating texture (upscaled low-res noise) — see
+    test_stitcher.py's _tall_page for why: Farneback needs real structure to
+    track, and a periodic pattern gives ambiguous displacement. `block` sizes
+    the noise coarsely enough for dominant_flow's Farneback pass (not just
+    template matching) to actually resolve a consistent displacement."""
+    rng = np.random.default_rng(seed)
+    small = rng.integers(0, 256, size=(page_h // block, w // block, 3), dtype=np.uint8)
+    return cv2.resize(small, (w, page_h), interpolation=cv2.INTER_CUBIC)
+
+
+class TestOpticalFlowEarlyOut:
+    def _build_manifest(self, frames: list[np.ndarray], tmp_path: Path) -> list[dict]:
+        manifest = []
+        for i, frame in enumerate(frames):
+            p = tmp_path / f"frame_{i:06d}.png"
+            _save_frame(frame, p)
+            manifest.append({"index": i, "timestamp_ms": i * 200, "path": str(p)})
+        return manifest
+
+    def test_near_static_frames_skip_optical_flow(self, tmp_path, monkeypatch):
+        """
+        dominant_flow (dense Farneback) is the most expensive check per pair.
+        When almost nothing changed between frames, its result is
+        mathematically guaranteed to stay near zero — the unchanged majority
+        dominates the frame-wide median — so it shouldn't be computed at all.
+        """
+        import autojourney.events.detector as detector_module
+
+        calls: list[int] = []
+        monkeypatch.setattr(
+            detector_module, "dominant_flow",
+            lambda a, b: (calls.append(1), (0.0, 0.0))[1],
+        )
+
+        base = _solid_frame((100, 100, 100))
+        tiny_change = base.copy()
+        tiny_change[:5, :5] = [200, 200, 200]  # corner change, far under the 40% floor
+
+        manifest = self._build_manifest([base, tiny_change, tiny_change], tmp_path)
+        detector = EventDetector(manifest, tmp_path)
+        list(detector.detect())
+
+        assert calls == [], "dominant_flow was called despite near-zero changed area"
+
+    def test_scroll_flow_zero_disables_the_shortcut(self, tmp_path, monkeypatch):
+        """
+        scroll_flow=0.0 is a deliberately supported 'maximally sensitive'
+        config (any nonzero flow counts, see test_explicit_zero_thresholds_
+        are_respected above) — the shortcut must not force flow to exactly
+        zero in that case, since that would silently disable scroll detection
+        instead of making it more sensitive.
+        """
+        import autojourney.events.detector as detector_module
+
+        calls: list[int] = []
+        monkeypatch.setattr(
+            detector_module, "dominant_flow",
+            lambda a, b: (calls.append(1), (0.0, 0.0))[1],
+        )
+
+        base = _solid_frame((100, 100, 100))
+        tiny_change = base.copy()
+        tiny_change[:5, :5] = [200, 200, 200]
+
+        manifest = self._build_manifest([base, tiny_change], tmp_path)
+        detector = EventDetector(manifest, tmp_path, scroll_flow=0.0)
+        list(detector.detect())
+
+        assert calls == [1], "dominant_flow should still run when scroll_flow == 0"
+
+    def test_scroll_sequence_still_detected(self, tmp_path):
+        """End-to-end: a real scroll (large, coherent frame-to-frame motion,
+        well above the early-out's 40% area floor) must still come through as
+        SCROLL_START/SCROLL_END, not get lost to the new shortcut."""
+        # frame_h/frame_w match dominant_flow's internal resize target (320x568)
+        # 1:1, so the measured displacement isn't distorted by a second resize.
+        frame_h, frame_w, step, num_frames = 320, 568, 20, 8
+        page_h = step * (num_frames - 1) + frame_h
+        page = _tall_noise_page(page_h, frame_w)
+
+        frames = [page[i * step:i * step + frame_h] for i in range(num_frames)]
+        manifest = self._build_manifest(frames, tmp_path)
+
+        detector = EventDetector(manifest, tmp_path, scroll_flow=1.0)
+        events = list(detector.detect())
+        types = [e.event_type for e in events]
+
+        assert EventType.SCROLL_START in types, f"no scroll detected: {types}"
+        assert EventType.SCROLL_END in types, f"scroll never closed: {types}"
