@@ -21,7 +21,6 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-from PIL import Image
 
 log = logging.getLogger(__name__)
 
@@ -29,18 +28,73 @@ log = logging.getLogger(__name__)
 TEMPLATE_FRACTION = 0.25
 # Search range: how far (in pixels) to look for the match beyond the expected region
 SEARCH_MARGIN = 80
+# Number of leading consecutive frame pairs to sample for direction detection
+DIRECTION_SAMPLE_PAIRS = 4
+
+
+def _match(frame_a: np.ndarray, frame_b: np.ndarray, direction: str) -> tuple[float, int]:
+    """
+    Template-match frame_a's trailing edge (bottom row or right column) against
+    frame_b's leading edge, in the given direction.
+
+    Returns (confidence, unique_pixels):
+      - confidence: the best normalized cross-correlation score (higher = more
+        confident this is a true alignment, not a coincidental one).
+      - unique_pixels: the number of non-overlapping rows/cols to take from
+        frame_b to extend a stitch in this direction.
+    """
+    h, w = frame_a.shape[:2]
+
+    if direction == "vertical":
+        # Template = bottom TEMPLATE_FRACTION of frame_a (greyscale)
+        tmpl_h = int(h * TEMPLATE_FRACTION)
+        template = cv2.cvtColor(frame_a[h - tmpl_h:, :], cv2.COLOR_BGR2GRAY)
+        # Search space = top portion of frame_b
+        search_h = tmpl_h + SEARCH_MARGIN
+        search = cv2.cvtColor(frame_b[:min(search_h + tmpl_h, h), :], cv2.COLOR_BGR2GRAY)
+        res = cv2.matchTemplate(search, template, cv2.TM_CCOEFF_NORMED)
+        _, max_val, _, max_loc = cv2.minMaxLoc(res)
+        match_top = max_loc[1]  # row in search where template starts
+        # Unique rows from frame_b = rows below where the overlap ends
+        overlap_end_in_b = match_top + tmpl_h
+        return float(max_val), max(1, h - overlap_end_in_b)
+    else:
+        tmpl_w = int(w * TEMPLATE_FRACTION)
+        template = cv2.cvtColor(frame_a[:, w - tmpl_w:], cv2.COLOR_BGR2GRAY)
+        search_w = tmpl_w + SEARCH_MARGIN
+        search = cv2.cvtColor(frame_b[:, :min(search_w + tmpl_w, w)], cv2.COLOR_BGR2GRAY)
+        res = cv2.matchTemplate(search, template, cv2.TM_CCOEFF_NORMED)
+        _, max_val, _, max_loc = cv2.minMaxLoc(res)
+        match_left = max_loc[0]
+        overlap_end_in_b = match_left + tmpl_w
+        return float(max_val), max(1, w - overlap_end_in_b)
 
 
 def _detect_scroll_direction(frames: list[np.ndarray]) -> str:
-    """Determine dominant scroll direction from optical flow."""
+    """
+    Determine dominant scroll direction by template-match confidence, voted
+    across the first few consecutive frame pairs.
+
+    Optical flow (the original approach) was dropped: Farneback's default
+    parameters can't resolve the frame-to-frame displacement typical of a
+    downsampled scroll capture, so on a long sequence its flow estimate is
+    noise and whichever axis's noise happens to be larger "wins" arbitrarily
+    — confirmed to misclassify a pure vertical scroll as horizontal once a
+    sequence runs past ~25 frames. Template matching is the same primitive
+    `_find_overlap_offset` already relies on for the stitch itself, and
+    unlike Farneback its confidence score isn't sensitive to displacement
+    size. Voting across several pairs (rather than just the first) guards
+    against the first pair happening to have near-zero motion, which is
+    likely right at a SCROLL_START boundary.
+    """
     if len(frames) < 2:
         return "vertical"
-    g1 = cv2.cvtColor(cv2.resize(frames[0], (320, 568)), cv2.COLOR_BGR2GRAY)
-    g2 = cv2.cvtColor(cv2.resize(frames[-1], (320, 568)), cv2.COLOR_BGR2GRAY)
-    flow = cv2.calcOpticalFlowFarneback(g1, g2, None, 0.5, 3, 15, 3, 5, 1.2, 0)
-    mean_dy = abs(float(np.median(flow[..., 1])))
-    mean_dx = abs(float(np.median(flow[..., 0])))
-    return "vertical" if mean_dy >= mean_dx else "horizontal"
+
+    v_total = h_total = 0.0
+    for a, b in list(zip(frames, frames[1:], strict=False))[:DIRECTION_SAMPLE_PAIRS]:
+        v_total += _match(a, b, "vertical")[0]
+        h_total += _match(a, b, "horizontal")[0]
+    return "vertical" if v_total >= h_total else "horizontal"
 
 
 def _find_overlap_offset(
@@ -55,33 +109,8 @@ def _find_overlap_offset(
     Returns a positive integer: the number of unique (non-overlapping) rows/cols
     to take from frame_b to extend the stitch.
     """
-    h, w = frame_a.shape[:2]
-
-    if direction == "vertical":
-        # Template = bottom TEMPLATE_FRACTION of frame_a (greyscale)
-        tmpl_h = int(h * TEMPLATE_FRACTION)
-        template = cv2.cvtColor(frame_a[h - tmpl_h:, :], cv2.COLOR_BGR2GRAY)
-        # Search space = top portion of frame_b
-        search_h = tmpl_h + SEARCH_MARGIN
-        search = cv2.cvtColor(frame_b[:min(search_h + tmpl_h, h), :], cv2.COLOR_BGR2GRAY)
-        res = cv2.matchTemplate(search, template, cv2.TM_CCOEFF_NORMED)
-        _, _, _, max_loc = cv2.minMaxLoc(res)
-        match_top = max_loc[1]  # row in search where template starts
-        # Unique rows from frame_b = rows below where the overlap ends
-        overlap_end_in_b = match_top + tmpl_h
-        unique_rows = h - overlap_end_in_b
-        return max(1, unique_rows)
-    else:
-        tmpl_w = int(w * TEMPLATE_FRACTION)
-        template = cv2.cvtColor(frame_a[:, w - tmpl_w:], cv2.COLOR_BGR2GRAY)
-        search_w = tmpl_w + SEARCH_MARGIN
-        search = cv2.cvtColor(frame_b[:, :min(search_w + tmpl_w, w)], cv2.COLOR_BGR2GRAY)
-        res = cv2.matchTemplate(search, template, cv2.TM_CCOEFF_NORMED)
-        _, _, _, max_loc = cv2.minMaxLoc(res)
-        match_left = max_loc[0]
-        overlap_end_in_b = match_left + tmpl_w
-        unique_cols = w - overlap_end_in_b
-        return max(1, unique_cols)
+    _, unique_pixels = _match(frame_a, frame_b, direction)
+    return unique_pixels
 
 
 def stitch_scroll(
@@ -116,7 +145,7 @@ def stitch_scroll(
     composite = frames[0]
 
     for i, frame_b in enumerate(frames[1:], start=1):
-        unique_pixels = _find_overlap_offset(composite, frame_b, direction)
+        unique_pixels = _find_overlap_offset(frames[i - 1], frame_b, direction)
 
         if direction == "vertical":
             h = frame_b.shape[0]

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
 import uuid
 from pathlib import Path
 from typing import Callable
@@ -138,6 +139,22 @@ def run_pipeline(
         screen_index += 1
         return screen
 
+    # Seed the screen the journey opens on. TRANSITION/MODAL events only ever
+    # add the *after*-frame, and SCROLL_END/VIDEO_END don't cover frame 0
+    # either, so without this the starting screen — and the root node of the
+    # journey graph — is dropped whenever any transition occurs.
+    opening_entry = manifest[0]
+    opening_dest = screens_dir / f"screen_{screen_index:04d}.png"
+    shutil.copy2(Path(opening_entry["path"]), opening_dest)
+    _add_screen(
+        opening_dest,
+        FrameEvent(
+            event_type=EventType.TRANSITION,
+            timestamp_ms=opening_entry["timestamp_ms"],
+            frame_index=opening_entry["index"],
+        ),
+    )
+
     for event in events:
         if event.event_type == EventType.SCROLL_END and event.scroll_frame_paths:
             stitch_path = screens_dir / f"scroll_{screen_index:04d}.png"
@@ -146,26 +163,9 @@ def run_pipeline(
 
         elif event.event_type in (EventType.TRANSITION, EventType.MODAL):
             if event.after_frame_path:
-                import shutil
                 dest = screens_dir / f"screen_{screen_index:04d}.png"
                 shutil.copy2(event.after_frame_path, dest)
                 _add_screen(dest, event)
-
-        elif event.event_type == EventType.VIDEO_END:
-            # Add last frame if we have no screens yet
-            if not session.screens and manifest:
-                last_path = Path(manifest[-1]["path"])
-                import shutil
-                dest = screens_dir / "screen_0000.png"
-                shutil.copy2(last_path, dest)
-                _add_screen(
-                    dest,
-                    FrameEvent(
-                        event_type=EventType.TRANSITION,
-                        timestamp_ms=manifest[-1]["timestamp_ms"],
-                        frame_index=manifest[-1]["index"],
-                    ),
-                )
 
     progress("stitch", f"Collected {len(session.screens)} screens")
 

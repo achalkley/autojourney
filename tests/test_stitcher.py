@@ -10,7 +10,11 @@ import cv2
 import numpy as np
 import pytest
 
-from autojourney.stitcher.scroll import stitch_scroll, _find_overlap_offset
+from autojourney.stitcher.scroll import (
+    stitch_scroll,
+    _detect_scroll_direction,
+    _find_overlap_offset,
+)
 
 
 def _gradient_frame(start_row: int, h: int = 300, w: int = 200) -> np.ndarray:
@@ -76,43 +80,40 @@ NUM_FRAMES = 12
 PAGE_H = SCROLL_STEP * (NUM_FRAMES - 1) + FRAME_H
 
 
-def _tall_page() -> np.ndarray:
+def _tall_page(page_h: int = PAGE_H, seed: int = 7) -> np.ndarray:
     """
-    A tall page of smooth, non-repeating texture.
+    A tall page of smooth, non-repeating texture: upscaled low-resolution noise.
 
-    Upscaled low-resolution noise, deliberately: per-pixel noise has no
-    structure for Farneback optical flow to track, so `_detect_scroll_direction`
-    misreads it as horizontal, and a periodic gradient gives template matching
-    several equally good alignments. This gives one unambiguous match per pair
-    and a flow field that reads as a vertical scroll.
+    A safe general-purpose choice for exercising template matching over a
+    scroll sequence — unlike a periodic gradient it has no repeat interval
+    for a large search window to alias onto, and unlike raw per-pixel noise
+    it still resembles the kind of soft-edged UI content the stitcher is
+    built for.
     """
-    rng = np.random.default_rng(7)
-    small = rng.integers(0, 256, size=(PAGE_H // 10, FRAME_W // 10, 3), dtype=np.uint8)
-    return cv2.resize(small, (FRAME_W, PAGE_H), interpolation=cv2.INTER_CUBIC)
+    rng = np.random.default_rng(seed)
+    small = rng.integers(0, 256, size=(page_h // 10, FRAME_W // 10, 3), dtype=np.uint8)
+    return cv2.resize(small, (FRAME_W, page_h), interpolation=cv2.INTER_CUBIC)
 
 
-def _scroll_sequence(tmp_path: Path) -> tuple[list[Path], int]:
+def _scroll_sequence(
+    tmp_path: Path, num_frames: int = NUM_FRAMES, step: int = SCROLL_STEP
+) -> tuple[list[Path], int]:
     """
     Simulate a viewport scrolling down a tall page.
 
     Returns (frame_paths, expected_stitched_height).
     """
-    page = _tall_page()
+    page_h = step * (num_frames - 1) + FRAME_H
+    page = _tall_page(page_h)
     paths = []
-    for i in range(NUM_FRAMES):
-        top = i * SCROLL_STEP
+    for i in range(num_frames):
+        top = i * step
         p = tmp_path / f"scroll_{i:06d}.png"
         cv2.imwrite(str(p), page[top:top + FRAME_H])
         paths.append(p)
-    return paths, PAGE_H
+    return paths, page_h
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="P0-1: _find_overlap_offset derives geometry from the growing composite "
-           "instead of the previous frame, so overlap is never removed and the "
-           "stitch degenerates into a plain vstack of every frame.",
-)
 def test_stitch_removes_overlap_across_long_scroll(tmp_path):
     """A 12-frame scroll over a 1400px page must produce ~1400px, not ~3000px."""
     paths, expected_h = _scroll_sequence(tmp_path)
@@ -122,3 +123,16 @@ def test_stitch_removes_overlap_across_long_scroll(tmp_path):
         f"stitched height {result.shape[0]} is not within 10% of the true page "
         f"height {expected_h}"
     )
+
+
+def test_direction_detection_stable_over_long_scroll(tmp_path):
+    """
+    Comparing only the first and last frame of a scroll (the original
+    implementation) loses the plot once a sequence runs long enough that
+    those two frames no longer overlap at all — confirmed empirically to
+    misclassify this exact fixture as horizontal at 30+ frames. Direction
+    must stay correct regardless of how long the scroll ran.
+    """
+    paths, _ = _scroll_sequence(tmp_path, num_frames=30)
+    frames = [cv2.imread(str(p)) for p in paths]
+    assert _detect_scroll_direction(frames) == "vertical"
