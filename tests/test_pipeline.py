@@ -170,3 +170,28 @@ def test_ctrl_c_during_usb_capture_continues_through_the_pipeline(tmp_path, stub
     assert (out / "events.json").exists()
     assert (out / "session.json").exists()
     assert (out / "journey-report.md").exists()
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Regression coverage for known defects (audit Phase 4: JPEG capture frames)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def test_screens_are_real_png_despite_jpeg_capture_frames(tmp_path, stub_analyser):
+    """
+    Captured frames are JPEG (disk-usage optimisation), but screens/ is
+    copied from them with a hardcoded .png filename and is read by both the
+    LLM analyser (as image/png) and the Figma publisher (Content-Type:
+    image/png). A raw byte copy from a JPEG source would produce files that
+    are named .png but decode as JPEG — silently wrong for both consumers.
+    Guard against that regression directly on the bytes, not just the name.
+    """
+    session = _run(tmp_path)
+
+    frame_files = list((tmp_path / "out" / "frames").glob("frame_*.jpg"))
+    assert frame_files, "expected captured frames to be JPEG"
+    assert frame_files[0].read_bytes()[:2] == b"\xff\xd8"
+
+    assert session.screens
+    for screen in session.screens:
+        assert screen.image_path.suffix == ".png"
+        assert screen.image_path.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"

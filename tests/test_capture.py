@@ -45,7 +45,7 @@ class TestFramesFromFile:
 
 
 class TestSaveFrames:
-    def test_saves_pngs_and_manifest(self, tmp_path):
+    def test_saves_jpegs_and_manifest(self, tmp_path):
         def fake_source():
             for i in range(3):
                 yield np.zeros((100, 50, 3), dtype=np.uint8), i, i * 100
@@ -54,7 +54,12 @@ class TestSaveFrames:
         assert frames_dir.exists()
         assert len(manifest) == 3
         for entry in manifest:
-            assert Path(entry["path"]).exists()
+            path = Path(entry["path"])
+            assert path.exists()
+            assert path.suffix == ".jpg"
+            # JPEG magic bytes (SOI marker) — guards against a PNG-shaped
+            # constant sneaking back into save_frames.
+            assert path.read_bytes()[:2] == b"\xff\xd8"
 
     def test_manifest_json_written(self, tmp_path):
         def fake_source():

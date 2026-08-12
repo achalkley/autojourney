@@ -9,10 +9,11 @@ from __future__ import annotations
 
 import json
 import logging
-import shutil
 import uuid
 from collections.abc import Callable
 from pathlib import Path
+
+import cv2
 
 from autojourney import config
 from autojourney.analyser.llm import analyse_screen
@@ -35,6 +36,21 @@ log = logging.getLogger(__name__)
 
 def _screen_id(index: int) -> str:
     return f"s{index:04d}"
+
+
+def _copy_as_png(src: Path, dest: Path) -> None:
+    """
+    Re-encode src as PNG at dest, regardless of src's own format.
+
+    Captured frames may be JPEG (see capture/agent.py), but screens are
+    analysed by a vision model and optionally uploaded to Figma — both
+    consumers assume the screens/ directory is PNG, so a raw byte copy
+    here would silently mislabel JPEG bytes with a .png extension.
+    """
+    frame = cv2.imread(str(src))
+    if frame is None:
+        raise RuntimeError(f"Could not read frame for screen re-encode: {src}")
+    cv2.imwrite(str(dest), frame)
 
 
 def run_pipeline(
@@ -145,7 +161,7 @@ def run_pipeline(
     # journey graph — is dropped whenever any transition occurs.
     opening_entry = manifest[0]
     opening_dest = screens_dir / f"screen_{screen_index:04d}.png"
-    shutil.copy2(Path(opening_entry["path"]), opening_dest)
+    _copy_as_png(Path(opening_entry["path"]), opening_dest)
     _add_screen(
         opening_dest,
         FrameEvent(
@@ -164,7 +180,7 @@ def run_pipeline(
         elif event.event_type in (EventType.TRANSITION, EventType.MODAL):
             if event.after_frame_path:
                 dest = screens_dir / f"screen_{screen_index:04d}.png"
-                shutil.copy2(event.after_frame_path, dest)
+                _copy_as_png(event.after_frame_path, dest)
                 _add_screen(dest, event)
 
     progress("stitch", f"Collected {len(session.screens)} screens")
