@@ -31,23 +31,12 @@ log = logging.getLogger(__name__)
 # SSIM helper (single-channel)
 # ──────────────────────────────────────────────────────────────────────────────
 
-def _ssim(a: np.ndarray, b: np.ndarray) -> float:
-    """Fast structural similarity on grayscale images (OpenCV)."""
-    a = cv2.cvtColor(a, cv2.COLOR_BGR2GRAY) if a.ndim == 3 else a
-    b = cv2.cvtColor(b, cv2.COLOR_BGR2GRAY) if b.ndim == 3 else b
-    if a.shape != b.shape:
-        b = cv2.resize(b, (a.shape[1], a.shape[0]))
-    # Use Gaussian-weighted SSIM via OpenCV
-    score, _ = cv2.quality.QualitySSIM_compute(  # type: ignore[attr-defined]
-        a[:, :, np.newaxis] if a.ndim == 2 else a,
-        b[:, :, np.newaxis] if b.ndim == 2 else b,
-    )
-    # Falls back to manual formula if OpenCV quality module unavailable
-    return float(np.mean(score))
+def ssim(a: np.ndarray, b: np.ndarray) -> float:
+    """Structural similarity on grayscale images (manual Gaussian-weighted formula).
 
-
-def _ssim_manual(a: np.ndarray, b: np.ndarray) -> float:
-    """Manual SSIM fallback (grayscale)."""
+    `cv2.quality.QualitySSIM_compute` would be faster, but that module ships
+    only in opencv-contrib-python, not the declared opencv-python dependency.
+    """
     a = cv2.cvtColor(a, cv2.COLOR_BGR2GRAY).astype(np.float64) if a.ndim == 3 else a.astype(np.float64)
     b = cv2.cvtColor(b, cv2.COLOR_BGR2GRAY).astype(np.float64) if b.ndim == 3 else b.astype(np.float64)
     if a.shape != b.shape:
@@ -63,13 +52,6 @@ def _ssim_manual(a: np.ndarray, b: np.ndarray) -> float:
     num = (2 * mu1_mu2 + C1) * (2 * sigma12 + C2)
     den = (mu1_sq + mu2_sq + C1) * (sigma1_sq + sigma2_sq + C2)
     return float(np.mean(num / den))
-
-
-def ssim(a: np.ndarray, b: np.ndarray) -> float:
-    try:
-        return _ssim(a, b)
-    except Exception:
-        return _ssim_manual(a, b)
 
 
 # ──────────────────────────────────────────────────────────────────────────────

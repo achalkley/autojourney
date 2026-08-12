@@ -129,12 +129,9 @@ class TestEventDetector:
 def test_ssim_correct_without_contrib_module(monkeypatch):
     """
     SSIM must be correct under the declared `opencv-python` dependency, which
-    does not ship `cv2.quality` (that module is contrib-only).
-
-    This is the permanent guarantee. It passes today via the fallback path, so
-    it is not a regression gate for P0-2 — that defect is a wasted exception on
-    every frame pair plus a misleading dependency, with no behavioural symptom
-    a test can pin. Phase 1 handles it as cleanup, verified by inspection.
+    does not ship `cv2.quality` (that module is contrib-only). ssim() no
+    longer references it at all (P0-2); delattr here is a cheap guard against
+    that reference coming back.
     """
     monkeypatch.delattr(cv2, "quality", raising=False)
 

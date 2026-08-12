@@ -86,11 +86,7 @@ class TestPipelineSmoke:
 
     def test_edges_reference_known_screens(self, tmp_path, stub_analyser):
         session = _run(tmp_path)
-        if not session.edges:
-            pytest.skip(
-                "pipeline produced no edges — P0-3 drops the opening screen, so "
-                "there is no transition to record. Becomes meaningful once fixed."
-            )
+        assert session.edges, "pipeline produced no edges"
         ids = {s.screen_id for s in session.screens}
         for edge in session.edges:
             assert edge.from_screen_id in ids
@@ -101,13 +97,6 @@ class TestPipelineSmoke:
 # Regression coverage for known defects (audit P0-3)
 # ──────────────────────────────────────────────────────────────────────────────
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="P0-3: screens are only collected from transition/modal *after*-frames "
-           "and scroll ends. The VIDEO_END backfill runs only when no screens "
-           "exist at all, so the screen the journey starts on is dropped whenever "
-           "any transition fires.",
-)
 def test_captures_the_screen_the_journey_starts_on(tmp_path, stub_analyser):
     """
     The video opens on a dark screen and cuts to a light one. Both are part of
