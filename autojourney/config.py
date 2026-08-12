@@ -25,6 +25,7 @@ def _int(key: str, default: int) -> int:
 LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "lmstudio")
 LM_STUDIO_BASE_URL: str = os.getenv("LM_STUDIO_BASE_URL", "http://localhost:1234/v1")
 LM_STUDIO_MODEL: str = os.getenv("LM_STUDIO_MODEL", "llava-llama-3-v-vision")
+LM_STUDIO_API_KEY: str | None = os.getenv("LM_STUDIO_API_KEY")
 OPENAI_API_KEY: str | None = os.getenv("OPENAI_API_KEY")
 ANTHROPIC_API_KEY: str | None = os.getenv("ANTHROPIC_API_KEY")
 

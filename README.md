@@ -49,6 +49,10 @@ LM_STUDIO_MODEL=llava-llama-3-v-vision   # model name as shown in LM Studio
 FIGMA_FILE_KEY=your_file_key             # from the URL: figma.com/design/<FILE_KEY>/
 ```
 
+If you've enabled LM Studio's optional "require API key" server setting, also set
+`LM_STUDIO_API_KEY` in `.env` — leave it unset for the default unauthenticated
+local server.
+
 No Figma token or local server to set up — the first `autojourney run` (or `publish`)
 opens a browser to authorize AutoJourney against your Figma account via OAuth. The
 resulting token is cached to `~/.config/autojourney/figma_oauth.json` and reused
@@ -96,7 +100,7 @@ After a run, `./output/` contains:
 
 | File | Description |
 |---|---|
-| `frames/` | Extracted PNG frames |
+| `frames/` | Extracted JPEG frames |
 | `frames/manifest.json` | Frame index with timestamps |
 | `events.json` | Detected events (transitions, scrolls, etc.) |
 | `screens/` | Per-screen PNGs (including stitched scroll images) |
@@ -109,6 +113,7 @@ See `.env.example` for all tunable parameters including:
 - `TRANSITION_SSIM_THRESHOLD` — sensitivity for detecting screen transitions
 - `SCROLL_FLOW_THRESHOLD` — optical flow magnitude to classify as scrolling
 - `LLM_PROVIDER` — override to `openai` or `anthropic` for cloud LLMs
+- `LM_STUDIO_API_KEY` — optional bearer token for LM Studio, only needed if its "require API key" server setting is enabled
 
 ## Development
 
