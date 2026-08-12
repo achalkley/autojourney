@@ -9,12 +9,11 @@ from __future__ import annotations
 
 import json
 import logging
-import shutil
 import uuid
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
+import cv2
 
 from autojourney import config
 from autojourney.analyser.llm import analyse_screen
@@ -37,6 +36,21 @@ log = logging.getLogger(__name__)
 
 def _screen_id(index: int) -> str:
     return f"s{index:04d}"
+
+
+def _copy_as_png(src: Path, dest: Path) -> None:
+    """
+    Re-encode src as PNG at dest, regardless of src's own format.
+
+    Captured frames may be JPEG (see capture/agent.py), but screens are
+    analysed by a vision model and optionally uploaded to Figma — both
+    consumers assume the screens/ directory is PNG, so a raw byte copy
+    here would silently mislabel JPEG bytes with a .png extension.
+    """
+    frame = cv2.imread(str(src))
+    if frame is None:
+        raise RuntimeError(f"Could not read frame for screen re-encode: {src}")
+    cv2.imwrite(str(dest), frame)
 
 
 def run_pipeline(
@@ -115,7 +129,6 @@ def run_pipeline(
     screens_dir = out / "screens"
     screens_dir.mkdir(exist_ok=True)
 
-    scroll_buffer: list[Path] = []
     screen_index = 0
     prev_screen_id: str | None = None
 
@@ -148,7 +161,7 @@ def run_pipeline(
     # journey graph — is dropped whenever any transition occurs.
     opening_entry = manifest[0]
     opening_dest = screens_dir / f"screen_{screen_index:04d}.png"
-    shutil.copy2(Path(opening_entry["path"]), opening_dest)
+    _copy_as_png(Path(opening_entry["path"]), opening_dest)
     _add_screen(
         opening_dest,
         FrameEvent(
@@ -167,7 +180,7 @@ def run_pipeline(
         elif event.event_type in (EventType.TRANSITION, EventType.MODAL):
             if event.after_frame_path:
                 dest = screens_dir / f"screen_{screen_index:04d}.png"
-                shutil.copy2(event.after_frame_path, dest)
+                _copy_as_png(event.after_frame_path, dest)
                 _add_screen(dest, event)
 
     progress("stitch", f"Collected {len(session.screens)} screens")
@@ -188,9 +201,12 @@ def run_pipeline(
         # Backfill transition edge labels now that we know screen names
         if i > 0:
             edge = session.edges[i - 1] if i - 1 < len(session.edges) else None
-            if edge and (not edge.interaction_label or edge.interaction_label == EventType.TRANSITION.value):
-                if screen.inferred_action:
-                    edge.interaction_label = screen.inferred_action
+            if (
+                edge
+                and (not edge.interaction_label or edge.interaction_label == EventType.TRANSITION.value)
+                and screen.inferred_action
+            ):
+                edge.interaction_label = screen.inferred_action
 
     # Persist session JSON
     session_path = out / "session.json"
@@ -243,7 +259,7 @@ def run_pipeline(
                 progress_callback=lambda done, total, msg: progress("figma", f"[{done}/{total}] {msg}"),
             )
             progress("figma", f"Published: {figma_url}")
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — a publish failure shouldn't discard an otherwise-complete local session
             log.error("Figma publish failed: %s", exc)
             progress("figma", f"ERROR: {exc}")
     else:

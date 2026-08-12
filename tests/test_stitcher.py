@@ -3,7 +3,6 @@ Tests for scroll stitcher.
 """
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 
 import cv2
@@ -11,9 +10,9 @@ import numpy as np
 import pytest
 
 from autojourney.stitcher.scroll import (
-    stitch_scroll,
     _detect_scroll_direction,
     _find_overlap_offset,
+    stitch_scroll,
 )
 
 

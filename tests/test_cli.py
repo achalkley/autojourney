@@ -7,7 +7,6 @@ from click.testing import CliRunner
 
 from autojourney.cli.main import cli
 
-
 # ──────────────────────────────────────────────────────────────────────────────
 # Regression coverage for known defects (audit Phase 2: fps validation)
 # ──────────────────────────────────────────────────────────────────────────────

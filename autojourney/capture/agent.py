@@ -6,19 +6,26 @@ Supported sources:
   2. Live USB stream from a connected iOS device via the QuickTime
      protocol, using the `ios-screen-record` package.
 
-Frames are written to OUTPUT_DIR/frames/ as PNG files named
-by their zero-padded frame index, e.g. frame_000123.png.
+Frames are written to OUTPUT_DIR/frames/ as JPEG files named
+by their zero-padded frame index, e.g. frame_000123.jpg.
 A manifest JSON is written alongside them.
+
+JPEG, not PNG: at 5fps a long capture session is thousands of frames, and
+these are an intermediate artifact consumed only by event detection and
+scroll stitching, not the final screens/ output shown to the LLM or
+uploaded to Figma (see pipeline.py's _copy_as_png, which re-encodes
+whatever lands here into PNG before either of those). Minor JPEG
+compression noise is well below the SSIM/template-matching thresholds
+those stages already tolerate.
 """
 from __future__ import annotations
 
 import json
 import logging
-import subprocess
 import threading
 import time
+from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Callable, Iterator
 
 import cv2
 import numpy as np
@@ -28,6 +35,8 @@ from autojourney import config
 log = logging.getLogger(__name__)
 
 FrameCallback = Callable[[np.ndarray, int, int], None]  # frame, index, timestamp_ms
+
+JPEG_QUALITY = 90
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -136,7 +145,7 @@ def save_frames(
     swallow_interrupt: bool = False,
 ) -> tuple[Path, list[dict]]:
     """
-    Consume a frame iterator, write PNGs to disk, and return
+    Consume a frame iterator, write JPEGs to disk, and return
     (frames_dir, manifest_list).
 
     manifest_list entries: {"index": int, "timestamp_ms": int, "path": str}
@@ -160,8 +169,8 @@ def save_frames(
 
     try:
         for frame, index, ts in source:
-            fname = frames_dir / f"frame_{index:06d}.png"
-            cv2.imwrite(str(fname), frame)
+            fname = frames_dir / f"frame_{index:06d}.jpg"
+            cv2.imwrite(str(fname), frame, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
             entry = {"index": index, "timestamp_ms": ts, "path": str(fname)}
             manifest.append(entry)
             if progress_callback:

@@ -13,10 +13,9 @@ Detection strategy:
 """
 from __future__ import annotations
 
-import json
 import logging
+from collections.abc import Generator
 from pathlib import Path
-from typing import Generator
 
 import cv2
 import numpy as np
@@ -25,6 +24,18 @@ from autojourney import config
 from autojourney.models import EventType, FrameEvent
 
 log = logging.getLogger(__name__)
+
+# dominant_flow (dense Farneback optical flow) is by far the most expensive
+# per-pair check. Its result is a median across the *whole* downsized frame,
+# so if fewer than this fraction of pixels changed at all, the unchanged
+# majority mathematically pulls that median toward zero regardless of what's
+# happening in the changed region — it cannot cross any positive scroll_flow
+# threshold. Below this floor, flow is skipped and treated as zero instead of
+# computed. Guarded to only apply when scroll_flow is a real positive
+# threshold, since the same reasoning doesn't hold at scroll_flow == 0 (any
+# nonzero flow — including sub-pixel measurement noise in an otherwise-static
+# region — would count).
+SCROLL_FLOW_SKIP_AREA_FLOOR = 0.4
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -171,7 +182,10 @@ class EventDetector:
 
             s = ssim(prev_frame, curr_frame)
             area = changed_area_fraction(prev_frame, curr_frame)
-            dx, dy = dominant_flow(prev_frame, curr_frame)
+            if self.scroll_flow > 0 and area < SCROLL_FLOW_SKIP_AREA_FLOOR:
+                dx, dy = 0.0, 0.0
+            else:
+                dx, dy = dominant_flow(prev_frame, curr_frame)
             flow_mag = (dx ** 2 + dy ** 2) ** 0.5
 
             is_scroll_motion = flow_mag > self.scroll_flow and (abs(dy) > abs(dx) * 1.5 or abs(dx) > abs(dy) * 1.5)

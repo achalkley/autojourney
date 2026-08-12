@@ -5,7 +5,7 @@ from a completed JourneySession.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from autojourney.models import JourneySession
@@ -40,20 +40,20 @@ def generate_report(session: JourneySession, output_path: Path) -> None:
     edge_by_dest = {e.to_screen_id: e for e in session.edges}
 
     lines: list[str] = [
-        f"# AutoJourney Session Report",
-        f"",
+        "# AutoJourney Session Report",
+        "",
         f"**Session ID:** `{session.session_id}`  ",
         f"**Source:** `{session.source_path}`  ",
-        f"**Generated:** {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}  ",
+        f"**Generated:** {datetime.now(UTC).strftime('%Y-%m-%d %H:%M UTC')}  ",
         f"**Screens captured:** {len(session.screens)}  ",
         f"**Transitions:** {len(session.edges)}  ",
-        f"",
-        f"---",
-        f"",
-        f"## Journey Log",
-        f"",
-        f"| Time | Screen | App | Action taken | Key UI elements |",
-        f"|---|---|---|---|---|",
+        "",
+        "---",
+        "",
+        "## Journey Log",
+        "",
+        "| Time | Screen | App | Action taken | Key UI elements |",
+        "|---|---|---|---|---|",
     ]
 
     for screen in session.screens:
@@ -68,17 +68,17 @@ def generate_report(session: JourneySession, output_path: Path) -> None:
         lines.append("| " + " | ".join(cells) + " |")
 
     lines += [
-        f"",
-        f"---",
-        f"",
-        f"## Screen Detail",
-        f"",
+        "",
+        "---",
+        "",
+        "## Screen Detail",
+        "",
     ]
 
     for screen in session.screens:
         lines += [
             f"### {screen.screen_name or screen.screen_id}",
-            f"",
+            "",
             f"- **App:** {screen.app_name or '—'}",
             f"- **Time:** {_ms_to_time(screen.timestamp_ms)}",
             f"- **Event type:** `{screen.event_type}`",
@@ -86,7 +86,7 @@ def generate_report(session: JourneySession, output_path: Path) -> None:
             f"- **UI elements:** {', '.join(screen.ui_elements) if screen.ui_elements else '—'}",
             f"- **Probable next destinations:** {', '.join(screen.probable_destinations) if screen.probable_destinations else '—'}",
             f"- **Image:** `{screen.image_path.name}`",
-            f"",
+            "",
         ]
 
     output_path.parent.mkdir(parents=True, exist_ok=True)

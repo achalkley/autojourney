@@ -35,7 +35,6 @@ def _setup_logging(verbose: bool) -> None:
 @click.group()
 def cli() -> None:
     """AutoJourney — capture iOS app sessions and generate Figma journey maps."""
-    pass
 
 
 @cli.command()
@@ -90,8 +89,8 @@ def run(
         console.print("[red]Error:[/red] --source and --usb are mutually exclusive")
         sys.exit(1)
 
-    from autojourney.pipeline import run_pipeline
     from autojourney import config
+    from autojourney.pipeline import run_pipeline
 
     out_dir = output or config.OUTPUT_DIR
 
@@ -131,7 +130,7 @@ def run(
             f"Session data: {out_dir / 'session.json'}",
             title="✅ Complete",
         ))
-    except Exception as exc:
+    except Exception:  # noqa: BLE001 — top-level CLI handler: report any failure and exit non-zero
         console.print_exception()
         sys.exit(1)
 
@@ -144,9 +143,10 @@ def publish(session_json: Path, verbose: bool) -> None:
     _setup_logging(verbose)
 
     import json
-    from autojourney.models import FlowEdge, JourneySession, Screen
-    from autojourney.flow.graph import build_graph, compute_tree_layout
+
     from autojourney.figma.publisher import publish_to_figma
+    from autojourney.flow.graph import build_graph, compute_tree_layout
+    from autojourney.models import FlowEdge, JourneySession, Screen
 
     raw = json.loads(session_json.read_text())
     session = JourneySession(
@@ -195,6 +195,7 @@ def publish(session_json: Path, verbose: bool) -> None:
 def report(session_json: Path, output: Path | None) -> None:
     """(Re-)generate the markdown report from an existing session.json."""
     import json
+
     from autojourney.models import FlowEdge, JourneySession, Screen
     from autojourney.report.markdown import generate_report
 
