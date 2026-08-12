@@ -15,6 +15,13 @@ from autojourney.models import JourneySession, Screen
 
 log = logging.getLogger(__name__)
 
+# Minimum spacing (in the same units the layout dict is published to Figma
+# in) between any two distinct node positions. Must stay >= the frame
+# footprint used when placing screens — keep in sync with figma/publisher.py
+# FRAME_W (390) / FRAME_H (844) / H_GAP (120).
+MIN_X_SPACING = 510
+MIN_Y_SPACING = 964
+
 
 def _screen_key(screen: Screen) -> str:
     """Canonical identity key for deduplication."""
@@ -74,34 +81,54 @@ def compute_tree_layout(G: nx.DiGraph) -> dict[str, tuple[float, float]]:
     if G.number_of_nodes() == 0:
         return {}
 
+    pos: dict[str, tuple[float, float]]
     try:
-        pos = nx.nx_agraph.graphviz_layout(G, prog="dot")
+        raw_pos = nx.nx_agraph.graphviz_layout(G, prog="dot")
         # Graphviz uses bottom-up y; flip for top-down
-        max_y = max(y for _, y in pos.values()) if pos else 0
-        return {n: (x, max_y - y) for n, (x, y) in pos.items()}
+        max_y = max(y for _, y in raw_pos.values()) if raw_pos else 0
+        pos = {n: (x, max_y - y) for n, (x, y) in raw_pos.items()}
     except Exception:  # noqa: BLE001 — graphviz backend is optional; any failure falls through to the next layout strategy
         log.debug("pygraphviz not available; using spring layout")
 
-    # Attempt hierarchical layout via topological generations
-    try:
-        roots = [n for n in G.nodes if G.in_degree(n) == 0]
-        if not roots:
-            roots = list(G.nodes)[:1]
-        pos = {}
-        for root in roots:
-            subgraph = nx.bfs_tree(G, root)
-            sub_pos = _hierarchy_pos(subgraph, root)
-            pos.update(sub_pos)
-        # Fill in any disconnected nodes
-        all_placed = set(pos.keys())
-        x_offset = max((x for x, _ in pos.values()), default=0) + 300
-        for node in G.nodes:
-            if node not in all_placed:
-                pos[node] = (x_offset, 0)
-                x_offset += 300
+        # Attempt hierarchical layout via topological generations
+        try:
+            roots = [n for n in G.nodes if G.in_degree(n) == 0]
+            if not roots:
+                roots = list(G.nodes)[:1]
+            pos = {}
+            for root in roots:
+                subgraph = nx.bfs_tree(G, root)
+                sub_pos = _hierarchy_pos(subgraph, root)
+                pos.update(sub_pos)
+            # Fill in any disconnected nodes
+            all_placed = set(pos.keys())
+            x_offset = max((x for x, _ in pos.values()), default=0) + 300
+            for node in G.nodes:
+                if node not in all_placed:
+                    pos[node] = (x_offset, 0)
+                    x_offset += 300
+        except Exception:  # noqa: BLE001 — final layout fallback: any failure in the hierarchy walk degrades to spring layout
+            pos = nx.spring_layout(G, seed=42, scale=800)
+
+    return _enforce_min_spacing(pos, MIN_X_SPACING, MIN_Y_SPACING)
+
+
+def _enforce_min_spacing(
+    pos: dict[str, tuple[float, float]], min_dx: float, min_dy: float
+) -> dict[str, tuple[float, float]]:
+    """Rescale positions so distinct x/y values are spaced at least min_dx/min_dy apart.
+
+    Layout backends (graphviz, the hierarchy fallback, spring layout) each produce
+    coordinates in their own native scale, none of which know about the actual
+    frame footprint used when placing screens in Figma. Ranking each node's
+    distinct x/y value and multiplying by a minimum spacing preserves relative
+    topology while guaranteeing no two frames can overlap.
+    """
+    if not pos:
         return pos
-    except Exception:  # noqa: BLE001 — final layout fallback: any failure in the hierarchy walk degrades to spring layout
-        return nx.spring_layout(G, seed=42, scale=800)
+    x_rank = {x: i for i, x in enumerate(sorted({x for x, _ in pos.values()}))}
+    y_rank = {y: i for i, y in enumerate(sorted({y for _, y in pos.values()}))}
+    return {n: (x_rank[x] * min_dx, y_rank[y] * min_dy) for n, (x, y) in pos.items()}
 
 
 def _hierarchy_pos(
