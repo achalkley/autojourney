@@ -9,7 +9,6 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-import pytest
 
 from autojourney.events.detector import (
     EventDetector,
@@ -143,11 +142,6 @@ def test_ssim_correct_without_contrib_module(monkeypatch):
     assert ssim(dark, light) < 0.5
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="P1: __init__ uses `arg or config.DEFAULT`, so an explicit 0.0 is "
-           "falsy and gets replaced by the config default.",
-)
 def test_explicit_zero_thresholds_are_respected(tmp_path):
     """0.0 is a legitimate threshold (disable the check), not 'unset'."""
     detector = EventDetector(
@@ -160,3 +154,59 @@ def test_explicit_zero_thresholds_are_respected(tmp_path):
     assert detector.transition_ssim == 0.0
     assert detector.transition_area == 0.0
     assert detector.scroll_flow == 0.0
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Regression coverage for known defects (audit Phase 2: frame-read resilience)
+# ──────────────────────────────────────────────────────────────────────────────
+
+class TestUnreadableFrames:
+    def _build_manifest(self, frames: list[np.ndarray], tmp_path: Path) -> list[dict]:
+        manifest = []
+        for i, frame in enumerate(frames):
+            p = tmp_path / f"frame_{i:06d}.png"
+            _save_frame(frame, p)
+            manifest.append({"index": i, "timestamp_ms": i * 200, "path": str(p)})
+        return manifest
+
+    def test_corrupt_middle_frame_does_not_abort_the_run(self, tmp_path):
+        """
+        A single unreadable frame anywhere in the manifest used to raise
+        RuntimeError out of detect(), killing every event after it. It should
+        instead be skipped, as if that frame were never captured.
+        """
+        frames = [_solid_frame((0, 0, 0)) for _ in range(3)]
+        frames += [_solid_frame((200, 200, 200)) for _ in range(3)]  # transition here
+        manifest = self._build_manifest(frames, tmp_path)
+        # Point one middle entry at a path that doesn't decode as an image.
+        bogus = tmp_path / "corrupt.png"
+        bogus.write_bytes(b"not a png")
+        manifest[2]["path"] = str(bogus)
+
+        detector = EventDetector(manifest, tmp_path, transition_ssim=0.85, transition_area=0.1)
+        events = list(detector.detect())  # must not raise
+
+        types = [e.event_type for e in events]
+        assert EventType.TRANSITION in types
+        assert events[-1].event_type == EventType.VIDEO_END
+
+    def test_corrupt_first_frame_does_not_abort_the_run(self, tmp_path):
+        """The very first manifest entry being unreadable is the sharpest case:
+        the old code loaded it unconditionally before the loop even started."""
+        frames = [_solid_frame((0, 0, 0)) for _ in range(2)]
+        frames += [_solid_frame((200, 200, 200)) for _ in range(2)]
+        manifest = self._build_manifest(frames, tmp_path)
+        bogus = tmp_path / "corrupt.png"
+        bogus.write_bytes(b"not a png")
+        manifest[0]["path"] = str(bogus)
+
+        detector = EventDetector(manifest, tmp_path, transition_ssim=0.85, transition_area=0.1)
+        events = list(detector.detect())  # must not raise
+        assert events[-1].event_type == EventType.VIDEO_END
+
+    def test_all_frames_unreadable_yields_only_video_end(self, tmp_path):
+        manifest = [{"index": 0, "timestamp_ms": 0, "path": str(tmp_path / "missing.png")}]
+        detector = EventDetector(manifest, tmp_path)
+        events = list(detector.detect())  # must not raise
+        assert len(events) == 1
+        assert events[0].event_type == EventType.VIDEO_END

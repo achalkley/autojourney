@@ -124,3 +124,49 @@ def test_captures_the_screen_the_journey_starts_on(tmp_path, stub_analyser):
 
     # With both screens present there is a transition between them to record.
     assert session.edges, "no edge recorded for the cut between the two screens"
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Regression coverage for known defects (audit Phase 2 / P0-4)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def test_ctrl_c_during_usb_capture_continues_through_the_pipeline(tmp_path, stub_analyser, monkeypatch):
+    """
+    Ctrl+C during live USB capture used to propagate a raw KeyboardInterrupt
+    out of save_frames before manifest.json was written, aborting the whole
+    run with frames on disk but no way to use them. It's also the documented
+    way to end a capture session (README: "Press Ctrl+C when done
+    navigating"), so the pipeline should treat it as "stop capturing" and
+    keep going through event detection, analysis and the report — not as an
+    abort.
+    """
+    import autojourney.capture.agent as agent_module
+
+    def fake_frames_from_usb(fps_limit: float = 5.0, stop_event=None):
+        frame_a = np.full((200, 100, 3), 20, dtype=np.uint8)
+        frame_b = np.full((200, 100, 3), 230, dtype=np.uint8)
+        for i in range(FRAMES_PER_SCENE):
+            yield frame_a, i, i * 100
+        for i in range(FRAMES_PER_SCENE, 2 * FRAMES_PER_SCENE - 2):
+            yield frame_b, i, i * 100
+        raise KeyboardInterrupt  # user pressed Ctrl+C
+
+    monkeypatch.setattr(agent_module, "frames_from_usb", fake_frames_from_usb)
+
+    session = run_pipeline(
+        video_path=None,  # selects the USB capture branch
+        output_dir=tmp_path / "out",
+        publish=False,
+        fps_limit=NATIVE_FPS,
+    )  # must not raise
+
+    out = tmp_path / "out"
+    assert (out / "frames" / "manifest.json").exists()
+    manifest = json.loads((out / "frames" / "manifest.json").read_text())
+    assert len(manifest) == 2 * FRAMES_PER_SCENE - 2, "frames before the interrupt were not all persisted"
+
+    # The interrupt must not have short-circuited the rest of the pipeline.
+    assert session.screens, "pipeline stopped instead of continuing past the interrupt"
+    assert (out / "events.json").exists()
+    assert (out / "session.json").exists()
+    assert (out / "journey-report.md").exists()

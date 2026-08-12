@@ -78,7 +78,10 @@ def run_pipeline(
         from autojourney.capture.agent import frames_from_usb
         frame_iter = frames_from_usb(fps_limit=fps_limit)
 
-    frames_dir, manifest = save_frames(frame_iter, output_dir=out)
+    # Ctrl+C during live USB capture is the documented way to end a capture
+    # session (see README) — treat it as "stop capturing", not an abort, and
+    # continue into the rest of the pipeline with whatever was captured.
+    frames_dir, manifest = save_frames(frame_iter, output_dir=out, swallow_interrupt=video_path is None)
     progress("capture", f"Extracted {len(manifest)} frames")
 
     if not manifest:
@@ -185,7 +188,7 @@ def run_pipeline(
         # Backfill transition edge labels now that we know screen names
         if i > 0:
             edge = session.edges[i - 1] if i - 1 < len(session.edges) else None
-            if edge and not edge.interaction_label or edge.interaction_label == EventType.TRANSITION.value:
+            if edge and (not edge.interaction_label or edge.interaction_label == EventType.TRANSITION.value):
                 if screen.inferred_action:
                     edge.interaction_label = screen.inferred_action
 

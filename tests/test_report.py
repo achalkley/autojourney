@@ -3,6 +3,7 @@ Tests for markdown report generator.
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from autojourney.models import EventType, FlowEdge, JourneySession, Screen
@@ -68,3 +69,58 @@ class TestGenerateReport:
         # Basic markdown checks
         assert content.startswith("# ")
         assert "| Time | Screen |" in content
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Regression coverage for known defects (audit Phase 2: table cell escaping)
+# ──────────────────────────────────────────────────────────────────────────────
+
+class TestTableCellEscaping:
+    """
+    Screen metadata is unsanitised LLM output. A literal `|` splits a row into
+    extra columns; a literal newline terminates it early and starts a new one.
+    Either corrupts the table for every row after it — assert through the
+    public entry point on the actual rendered table, not the escaping helper.
+    """
+
+    def _journey_log_rows(self, content: str) -> list[str]:
+        lines = content.splitlines()
+        header = "| Time | Screen | App | Action taken | Key UI elements |"
+        start = lines.index(header) + 2  # skip header + '|---|...' separator
+        end = next(i for i in range(start, len(lines)) if not lines[i].startswith("|"))
+        return lines[start:end]
+
+    def test_pipe_in_llm_text_does_not_split_columns(self, tmp_path):
+        session = _make_session()
+        session.screens[0].app_name = "Shop | App"
+
+        out = tmp_path / "report.md"
+        generate_report(session, out)
+        content = out.read_text()
+
+        rows = self._journey_log_rows(content)
+        assert len(rows) == len(session.screens), (
+            f"expected {len(session.screens)} table rows, got {len(rows)}: {rows!r}"
+        )
+        # Exactly 6 unescaped pipes per row (5 columns) — a literal "|" that
+        # leaked through unescaped would push this to 7+.
+        for row in rows:
+            unescaped_pipes = re.findall(r"(?<!\\)\|", row)
+            assert len(unescaped_pipes) == 6, (
+                f"row has {len(unescaped_pipes)} unescaped '|' (expected 6): {row!r}"
+            )
+        assert "Shop \\| App" in content
+
+    def test_newline_in_llm_text_does_not_add_a_row(self, tmp_path):
+        session = _make_session()
+        session.screens[0].inferred_action = "Tapped\nbutton"
+
+        out = tmp_path / "report.md"
+        generate_report(session, out)
+        content = out.read_text()
+
+        rows = self._journey_log_rows(content)
+        assert len(rows) == len(session.screens), (
+            f"expected {len(session.screens)} table rows, got {len(rows)}: {rows!r}"
+        )
+        assert "Tapped button" in content

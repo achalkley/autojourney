@@ -120,15 +120,19 @@ class EventDetector:
     ) -> None:
         self.manifest = manifest
         self.frames_dir = frames_dir
-        self.transition_ssim = transition_ssim or config.TRANSITION_SSIM_THRESHOLD
-        self.transition_area = transition_area or config.TRANSITION_AREA_FRACTION
-        self.scroll_flow = scroll_flow or config.SCROLL_FLOW_THRESHOLD
+        self.transition_ssim = (
+            transition_ssim if transition_ssim is not None else config.TRANSITION_SSIM_THRESHOLD
+        )
+        self.transition_area = (
+            transition_area if transition_area is not None else config.TRANSITION_AREA_FRACTION
+        )
+        self.scroll_flow = scroll_flow if scroll_flow is not None else config.SCROLL_FLOW_THRESHOLD
 
-    def _load(self, entry: dict) -> np.ndarray:
+    def _load(self, entry: dict) -> np.ndarray | None:
         path = Path(entry["path"])
         frame = cv2.imread(str(path))
         if frame is None:
-            raise RuntimeError(f"Cannot read frame: {path}")
+            log.warning("Cannot read frame, skipping: %s", path)
         return frame
 
     def detect(self) -> Generator[FrameEvent, None, None]:
@@ -138,11 +142,30 @@ class EventDetector:
         scroll_accumulator: list[dict] = []
         in_scroll = False
 
-        prev_entry = self.manifest[0]
-        prev_frame = self._load(prev_entry)
+        # An unreadable frame is treated as if it were never captured: it is
+        # skipped entirely rather than compared against anything, so a single
+        # corrupt frame doesn't abort the whole run.
+        remaining = iter(self.manifest)
+        prev_entry: dict | None = None
+        prev_frame: np.ndarray | None = None
+        for entry in remaining:
+            frame = self._load(entry)
+            if frame is not None:
+                prev_entry, prev_frame = entry, frame
+                break
 
-        for entry in self.manifest[1:]:
+        if prev_frame is None or prev_entry is None:
+            yield FrameEvent(
+                event_type=EventType.VIDEO_END,
+                timestamp_ms=self.manifest[-1]["timestamp_ms"],
+                frame_index=self.manifest[-1]["index"],
+            )
+            return
+
+        for entry in remaining:
             curr_frame = self._load(entry)
+            if curr_frame is None:
+                continue
             ts = entry["timestamp_ms"]
             idx = entry["index"]
 
