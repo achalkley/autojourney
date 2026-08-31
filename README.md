@@ -1,3 +1,6 @@
+> [!CAUTION]
+> This is an AI-developed project still under heavy refinement and the author cautions that it is not production ready, free of bugs, or unexpected behaviour. Use at your own risk.
+
 # AutoJourney
 
 Capture a user's navigation through a 3rd-party iOS app and produce a visual journey map in Figma — including stitched scroll views, labelled screens, and inferred interaction flows.
