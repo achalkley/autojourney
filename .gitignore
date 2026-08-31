@@ -24,3 +24,5 @@ build/
 .pytest_cache/
 .venv/
 venv/
+agents.md
+*.DS_Store
